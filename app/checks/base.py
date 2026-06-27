@@ -32,6 +32,7 @@ _CATEGORY_MODULES: tuple[str, ...] = (
     "fixed_assets",
     "documents",
     "tax",
+    "coding",
 )
 
 

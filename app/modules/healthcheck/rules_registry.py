@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.checks.coding import META as _CODING_META
 from app.checks.documents import META as _DOCUMENTS_META
 from app.checks.fixed_assets import META as _FIXED_ASSETS_META
 from app.checks.tax import META as _TAX_META
@@ -33,17 +34,7 @@ _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("duplicate_contact", "Duplicate contacts", True),
     ],
     "Tax & VAT": list(_TAX_META),
-    "Categorisation & Coding": [
-        ("wrong_category", "Wrong category", True),
-        ("unexpected_account", "Unexpected account", True),
-        ("multi_account_supplier", "Multi-account suppliers (vendor drift)", True),
-        ("misallocated_item", "Misallocated items (vague account)", True),
-        ("wrong_direction_account", "Wrong-direction account (income vs expense)", True),
-        ("invoice_or_direct_booking", "Invoice or direct booking", True),
-        ("bill_or_direct_booking", "Bill or direct booking", True),
-        ("anomaly", "Anomaly (LLM)", True),
-        ("amount_outlier", "Amount outlier vs vendor history", True),
-    ],
+    "Categorisation & Coding": list(_CODING_META),
     "Date & Ageing": [
         ("future_dated", "Future-dated documents", True),
         ("old_unpaid_bill", "Overdue bills (we owe)", True),

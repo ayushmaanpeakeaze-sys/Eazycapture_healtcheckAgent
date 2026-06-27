@@ -18,10 +18,8 @@ from app.schemas.transaction import (
     ContactDefault,
 )
 from app.services.healthcheck import run_batch_health_check
+from app.checks.coding import _find_unexpected_accounts
 from app.checks.tax import _find_unexpected_tax_codes
-from app.services.healthcheck.deterministic import (
-    _find_unexpected_accounts,
-)
 
 _COA = {"400": "Rent", "401": "Travel", "200": "Sales"}
 

@@ -31,6 +31,14 @@ from app.checks.fixed_assets import (
     _find_capital_items,
     _find_low_cost_fixed_assets,
 )
+from app.checks.coding import (
+    _find_direction_mismatches,
+    _find_misallocated_items,
+    _find_multi_account_suppliers,
+    _find_unexpected_accounts,
+    amount_outlier_flag,
+    find_amount_outlier_candidates,
+)
 from app.checks.tax import (
     _find_multi_tax_code_suppliers,
     _find_purchase_tax_missing,
@@ -42,15 +50,9 @@ from app.checks.tax import (
 from app.services.healthcheck.deterministic import (
     _find_bill_direct_payments,
     _find_invoice_direct_deposits,
-    _find_direction_mismatches,
     _find_duplicate_bills,
-    _find_misallocated_items,
-    _find_multi_account_suppliers,
     _find_opening_balance_differences,
-    _find_unexpected_accounts,
     _inspect_transaction,
-    amount_outlier_flag,
-    find_amount_outlier_candidates,
 )
 from app.modules.ai.checks_llm import (
     _batched_category_audit,

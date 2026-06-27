@@ -382,18 +382,7 @@ _SETTINGS_META: tuple[SettingField, ...] = (
     # Fixed-asset checks' settings moved to app/checks/fixed_assets.py
     # (aggregated via collect_category_setting_fields()).
     # --- Misallocated items (vague account + material amount) -------------
-    SettingField("misallocated_materiality", "Categorisation & Coding", "misallocated_item",
-                 "Flag vague-account items over …", "amount",
-                 "Flag a line posted to a broad/vague account (General Expenses, "
-                 "Uncategorised, Unapplied, Sundry, Suspense, …) when its net "
-                 "amount is at least this much. Default 100 — raise it to your "
-                 "materiality policy.",
-                 unit="currency", min=0, step=50),
-    SettingField("misallocated_vague_codes", "Categorisation & Coding", "misallocated_item",
-                 "Additional vague accounts to monitor", "list",
-                 "Extra account CODES to treat as vague (on top of the built-in "
-                 "name match: General Expenses, Uncategorised, Unapplied, Sundry, "
-                 "Miscellaneous, Suspense …). E.g. a custom catch-all code."),
+    # Misallocated-items settings moved to app/checks/coding.py.
     # Undocumented-bill settings moved to app/checks/documents.py.
     # (capital_item_review settings also live in app/checks/fixed_assets.py)
 )
