@@ -1,0 +1,66 @@
+"""Unreconciled Bank Items — runtime orchestration.
+
+Fetches Xero bank transactions, counts the unreconciled ones per account
+(``app.services.healthcheck.unreconciled_bank``), attaches a Xero "Process"
+deep-link, and honours the per-company exclude list (stored on audit_config).
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Optional
+from uuid import UUID
+
+from app.modules.healthcheck.services.company_config import CompanyConfigStore
+from app.modules.healthcheck.xero_links import xero_deep_link
+from app.modules.integrations.service import IntegrationService
+from app.services.healthcheck.unreconciled_bank import compute_unreconciled_accounts
+
+logger = logging.getLogger("hcpoc.unreconciled_bank_service")
+
+
+def _excluded(cfg: dict[str, Any]) -> set[str]:
+    node = cfg.get("unreconciled")
+    codes = node.get("excluded") if isinstance(node, dict) else None
+    return {str(c).strip().upper() for c in (codes or [])}
+
+
+class UnreconciledBankService:
+    def __init__(self, db, integration: Optional[IntegrationService] = None) -> None:
+        self._db = db
+        self._store = CompanyConfigStore(db)
+        self._integration = integration or IntegrationService()
+
+    async def list_accounts(self, company_id: UUID) -> dict[str, Any]:
+        company, cfg = await self._store.load(company_id)
+        if company is None:
+            return {"total_to_reconcile": 0, "items": []}
+        conn = getattr(company, "nango_connection_id", None)
+        tenant = getattr(company, "xero_tenant_id", None)
+        shortcode = getattr(company, "xero_shortcode", None)
+
+        txns = []
+        if self._integration.is_connected(conn, tenant):
+            txns = await self._integration.fetch_all_bank_transactions(conn, tenant) or []
+
+        rows = compute_unreconciled_accounts(txns, exclude_codes=_excluded(cfg))
+        total = 0
+        for r in rows:
+            total += r["total_to_reconcile"]
+            r["process_url"] = xero_deep_link("BANK", r["account_id"], shortcode)
+        return {
+            "total_to_reconcile": total,
+            # Honest banner so the UI never implies the feed-side count is zero.
+            "unexplained_available": False,
+            "items": rows,
+        }
+
+    async def exclude_account(self, company_id: UUID, account_code: str, *, excluded: bool) -> None:
+        company, cfg = await self._store.load(company_id)
+        if company is None:
+            return
+        node = dict(cfg.get("unreconciled") or {})
+        current = set(node.get("excluded") or [])
+        current.add(account_code) if excluded else current.discard(account_code)
+        node["excluded"] = sorted(current)
+        cfg["unreconciled"] = node
+        await self._store.save(company, cfg)

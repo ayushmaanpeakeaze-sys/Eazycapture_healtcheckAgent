@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: hcpoc
+          POSTGRES_PASSWORD: hcpoc
+          POSTGRES_DB: healthcheck_poc
+        ports: ["5434:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hcpoc -d healthcheck_poc"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 5
+
+    env:
+      # Tests run with auth off by default (conftest sets AUTH_DISABLED=true);
+      # CI Redis has no password so use a plain URL here.
+      DATABASE_URL: postgresql+asyncpg://hcpoc:hcpoc@127.0.0.1:5434/healthcheck_poc
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/1
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/2
+      APP_ENV: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Run test suite
+        run: pytest -q

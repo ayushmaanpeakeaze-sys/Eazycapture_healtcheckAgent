@@ -1,0 +1,107 @@
+# Full local/production-shaped stack: API + Celery worker + beat + migrate
+# one-shot, plus Redis and Postgres.
+#
+# The app's .env uses 127.0.0.1 host URLs (for running uvicorn directly on
+# your machine). Inside Docker, services reach each other by *service name*,
+# so the DB/Redis URLs are overridden per-service below via `environment:`
+# (which takes precedence over `env_file`). That keeps one .env working both
+# on-host and in-compose.
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hcpoc}:${POSTGRES_PASSWORD:-hcpoc}@postgres:5432/${POSTGRES_DB:-healthcheck_poc}
+  REDIS_URL: redis://:${REDIS_PASSWORD:-peakeaze-redis}@redis:6379/0
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-peakeaze-redis}@redis:6379/1
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-peakeaze-redis}@redis:6379/2
+
+services:
+  # One-shot: bring the schema up to head before app/worker start.
+  migrate:
+    build: .
+    env_file: .env
+    environment: *app-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  agent:
+    build: .
+    ports:
+      - "8001:8001"
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Background audits + AI enrichment.
+  worker:
+    build: .
+    env_file: .env
+    environment: *app-env
+    command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Scheduled jobs (e.g. daily Xero connection reconcile).
+  beat:
+    build: .
+    env_file: .env
+    environment: *app-env
+    command: ["celery", "-A", "app.core.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: eaz-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-peakeaze-redis}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-peakeaze-redis}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # Postgres. Host port 5434 to avoid clashing with other local Postgres.
+  # In production prefer a managed database (backups, HA) over this container.
+  postgres:
+    image: postgres:17-alpine
+    container_name: eaz-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hcpoc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hcpoc}
+      POSTGRES_DB: ${POSTGRES_DB:-healthcheck_poc}
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hcpoc} -d ${POSTGRES_DB:-healthcheck_poc}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:
