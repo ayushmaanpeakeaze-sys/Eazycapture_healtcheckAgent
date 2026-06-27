@@ -10,7 +10,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.schemas.transaction import BatchTransaction
-from app.services.healthcheck.deterministic import (
+from app.checks.tax import (
     _find_purchase_tax_missing,
     _find_sales_tax_missing,
 )

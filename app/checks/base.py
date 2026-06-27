@@ -31,6 +31,7 @@ class SettingField:
 _CATEGORY_MODULES: tuple[str, ...] = (
     "fixed_assets",
     "documents",
+    "tax",
 )
 
 

@@ -14,6 +14,7 @@ from typing import Any
 
 from app.checks.documents import META as _DOCUMENTS_META
 from app.checks.fixed_assets import META as _FIXED_ASSETS_META
+from app.checks.tax import META as _TAX_META
 
 # group → list of (key, label, built)
 _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
@@ -31,16 +32,7 @@ _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("duplicate_credit_note", "Duplicate credit notes", True),
         ("duplicate_contact", "Duplicate contacts", True),
     ],
-    "Tax & VAT": [
-        ("missing_tax", "Missing tax code (any document)", True),
-        ("invalid_tax_code", "Invalid tax code", True),
-        ("sales_tax_missing", "Sales tax missing", True),
-        ("purchase_tax_missing", "Purchase tax missing", True),
-        ("sales_tax_on_bills", "Sales tax on bills (suspicious)", True),
-        ("purchase_tax_on_invoices", "Purchase tax on invoices (suspicious)", True),
-        ("unexpected_tax_code", "Unexpected tax code", True),
-        ("multi_tax_code_supplier", "Multi-tax suppliers (vendor drift)", True),
-    ],
+    "Tax & VAT": list(_TAX_META),
     "Categorisation & Coding": [
         ("wrong_category", "Wrong category", True),
         ("unexpected_account", "Unexpected account", True),

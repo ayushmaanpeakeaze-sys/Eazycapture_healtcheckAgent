@@ -31,6 +31,14 @@ from app.checks.fixed_assets import (
     _find_capital_items,
     _find_low_cost_fixed_assets,
 )
+from app.checks.tax import (
+    _find_multi_tax_code_suppliers,
+    _find_purchase_tax_missing,
+    _find_purchase_tax_on_invoices,
+    _find_sales_tax_missing,
+    _find_sales_tax_on_bills,
+    _find_unexpected_tax_codes,
+)
 from app.services.healthcheck.deterministic import (
     _find_bill_direct_payments,
     _find_invoice_direct_deposits,
@@ -38,14 +46,8 @@ from app.services.healthcheck.deterministic import (
     _find_duplicate_bills,
     _find_misallocated_items,
     _find_multi_account_suppliers,
-    _find_multi_tax_code_suppliers,
     _find_opening_balance_differences,
-    _find_purchase_tax_missing,
-    _find_purchase_tax_on_invoices,
-    _find_sales_tax_missing,
-    _find_sales_tax_on_bills,
     _find_unexpected_accounts,
-    _find_unexpected_tax_codes,
     _inspect_transaction,
     amount_outlier_flag,
     find_amount_outlier_candidates,

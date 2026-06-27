@@ -5,11 +5,11 @@ from datetime import date
 from decimal import Decimal
 
 from app.schemas.transaction import BatchLineItem, BatchTransaction
+from app.checks.tax import _find_multi_tax_code_suppliers
 from app.services.healthcheck.deterministic import (
     _build_contact_alias,
     _contact_key,
     _find_multi_account_suppliers,
-    _find_multi_tax_code_suppliers,
     _find_opening_balance_differences,
 )
 
