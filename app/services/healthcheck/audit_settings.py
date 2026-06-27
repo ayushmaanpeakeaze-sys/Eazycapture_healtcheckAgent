@@ -263,19 +263,13 @@ DEFAULT_SETTINGS = AuditSettings()
 #   percent   → 0..1 value rendered as a percentage / slider
 #   list      → comma-separated / tag list of codes, ids or names
 #   select    → one of ``options`` (a dropdown)
-@dataclass(frozen=True)
-class SettingField:
-    key: str          # must match an AuditSettings field name
-    group: str        # must match a rules_registry group name
-    check: str        # must match a rules_registry rule key
-    label: str
-    type: str         # bool | int | amount | multiple | percent | list | select
-    help: str
-    unit: Optional[str] = None
-    min: Optional[float] = None
-    max: Optional[float] = None
-    step: Optional[float] = None
-    options: Optional[tuple[str, ...]] = None   # allowed values for type "select"
+# SettingField now lives in app/checks/base.py (a neutral module) so per-category
+# check modules can define their own fields without a circular import. Re-exported
+# here so existing ``from audit_settings import SettingField`` keeps working.
+from app.checks.base import (  # noqa: E402
+    SettingField,
+    collect_category_setting_fields,
+)
 
 
 # Field metadata per check. Add more checks' fields here (mapped to their rule
@@ -385,14 +379,8 @@ _SETTINGS_META: tuple[SettingField, ...] = (
                  "date. Xenon default 0 = surface every unapproved document "
                  "immediately. Applies to both unapproved invoices and bills.",
                  unit="days", min=0, max=365, step=1),
-    # --- Low-cost fixed asset (fixed-asset line too cheap → expense it) ----
-    SettingField("low_cost_asset_max", "Fixed Assets", "low_cost_fixed_asset",
-                 "Capitalisation threshold", "amount",
-                 "Flag any line (invoice, bill, Money In or Money Out) posted to "
-                 "a FIXED-asset account for LESS than this amount — too cheap to "
-                 "capitalise, probably should be expensed. Set it to your "
-                 "organisation's capitalisation policy. Default 10,000.",
-                 unit="currency", min=0, step=100),
+    # Fixed-asset checks' settings moved to app/checks/fixed_assets.py
+    # (aggregated via collect_category_setting_fields()).
     # --- Misallocated items (vague account + material amount) -------------
     SettingField("misallocated_materiality", "Categorisation & Coding", "misallocated_item",
                  "Flag vague-account items over …", "amount",
@@ -406,33 +394,8 @@ _SETTINGS_META: tuple[SettingField, ...] = (
                  "Extra account CODES to treat as vague (on top of the built-in "
                  "name match: General Expenses, Uncategorised, Unapplied, Sundry, "
                  "Miscellaneous, Suspense …). E.g. a custom catch-all code."),
-    # --- Undocumented bills (no attachment) -------------------------------
-    SettingField("undocumented_min_amount", "Document Integrity", "undocumented_bill",
-                 "Ignore bills under …", "amount",
-                 "Don't flag an unattached bill below this value. Default 0 = flag "
-                 "any amount.",
-                 unit="currency", min=0, step=10),
-    SettingField("undocumented_tax_only", "Document Integrity", "undocumented_bill",
-                 "Only bills that include tax", "bool",
-                 "When on, only flag unattached bills that have a VAT/tax amount > 0 "
-                 "(skip zero-tax bills like wages/bank charges)."),
-    SettingField("undocumented_ignore_contacts", "Document Integrity", "undocumented_bill",
-                 "Ignore these contacts", "list",
-                 "Contact ids OR names whose bills never need an attachment (e.g. a "
-                 "director). 'Ignore this contact' appends here."),
-    # --- Capital item review (expense too big → maybe an asset) ------------
-    SettingField("capital_item_threshold", "Fixed Assets", "capital_item_review",
-                 "Flag expense over …", "amount",
-                 "Flag a line posted to a monitored EXPENSE account for more than "
-                 "this amount — it may really be a capital item (fixed asset). "
-                 "Mirror of the low-cost fixed-asset check. Default 5,000.",
-                 unit="currency", min=0, step=100),
-    SettingField("capital_monitored_accounts", "Fixed Assets", "capital_item_review",
-                 "Monitored expense accounts", "list",
-                 "Account CODES to watch for capital items (e.g. 461 Printing, "
-                 "473 Repairs). Leave empty to auto-watch any expense account whose "
-                 "name looks capital-suspicious (repairs / maintenance / printing / "
-                 "stationery)."),
+    # Undocumented-bill settings moved to app/checks/documents.py.
+    # (capital_item_review settings also live in app/checks/fixed_assets.py)
 )
 
 
@@ -449,7 +412,8 @@ def settings_schema() -> list[dict[str, Any]]:
     """
     defaults = DEFAULT_SETTINGS.as_json_dict()
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for f in _SETTINGS_META:
+    # Central fields + each per-category module's SETTING_FIELDS (e.g. Fixed Assets).
+    for f in _SETTINGS_META + collect_category_setting_fields():
         bucket = grouped.setdefault(
             (f.group, f.check),
             {"group": f.group, "check": f.check, "fields": []},

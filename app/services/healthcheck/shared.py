@@ -10,7 +10,21 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from app.schemas.transaction import BatchContext, FlaggedIssue
+from app.schemas.transaction import BatchContext, BatchTransaction, FlaggedIssue
+
+
+def _account_lines(
+    tx: BatchTransaction,
+) -> list[tuple[Optional[int], Optional[str], Optional[Decimal]]]:
+    """(line_no, account_code, amount) per document line — falls back to the
+    flat ``current_account_code`` / ``amount`` when there are no line items.
+    Shared by the deterministic rules and the per-category check modules."""
+    if tx.line_items:
+        return [
+            (idx + 1, item.account_code, item.amount)
+            for idx, item in enumerate(tx.line_items)
+        ]
+    return [(None, tx.current_account_code, tx.amount)]
 
 logger = __import__("logging").getLogger("uvicorn.error")
 

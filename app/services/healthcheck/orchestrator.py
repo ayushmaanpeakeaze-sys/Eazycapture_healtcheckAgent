@@ -26,11 +26,14 @@ from app.services.healthcheck.shared import (
     _noop_issues,
     _tax_direction_map,
 )
+from app.checks.documents import _find_undocumented_bills
+from app.checks.fixed_assets import (
+    _find_capital_items,
+    _find_low_cost_fixed_assets,
+)
 from app.services.healthcheck.deterministic import (
     _find_bill_direct_payments,
-    _find_capital_items,
     _find_invoice_direct_deposits,
-    _find_low_cost_fixed_assets,
     _find_direction_mismatches,
     _find_duplicate_bills,
     _find_misallocated_items,
@@ -41,7 +44,6 @@ from app.services.healthcheck.deterministic import (
     _find_purchase_tax_on_invoices,
     _find_sales_tax_missing,
     _find_sales_tax_on_bills,
-    _find_undocumented_bills,
     _find_unexpected_accounts,
     _find_unexpected_tax_codes,
     _inspect_transaction,

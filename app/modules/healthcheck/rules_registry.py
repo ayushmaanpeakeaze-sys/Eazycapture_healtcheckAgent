@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.checks.documents import META as _DOCUMENTS_META
+from app.checks.fixed_assets import META as _FIXED_ASSETS_META
+
 # group → list of (key, label, built)
 _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
     "Bank & Reconciliation": [
@@ -65,14 +68,8 @@ _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("contact_defaults", "Contact defaults missing", True),
         ("inactive_contact", "Inactive contacts", True),
     ],
-    "Document Integrity": [
-        ("missing_invoice_number", "Missing invoice number", True),
-        ("undocumented_bill", "Undocumented bills (no attachment)", True),
-    ],
-    "Fixed Assets": [
-        ("low_cost_fixed_asset", "Low-cost fixed asset", True),
-        ("capital_item_review", "Capital item review", True),
-    ],
+    "Document Integrity": list(_DOCUMENTS_META),
+    "Fixed Assets": list(_FIXED_ASSETS_META),
     "Currency": [
         ("currency_mismatch", "Currency mismatch", False),
     ],

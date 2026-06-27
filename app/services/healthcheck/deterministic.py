@@ -15,6 +15,7 @@ from typing import Any, Optional
 from app.schemas.transaction import BatchTransaction, FlaggedIssue
 from app.services.healthcheck.audit_settings import AuditSettings
 from app.services.healthcheck.shared import (
+    _account_lines,
     _allowed_account_types_for_doc,
     _CREDIT_DOC_TYPES,
     _EXPENSE_ACCOUNT_TYPES,
@@ -42,17 +43,6 @@ def _tax_lines(tx: BatchTransaction) -> list[tuple[Optional[int], Optional[str]]
     if tx.line_items:
         return [(idx + 1, item.tax_code) for idx, item in enumerate(tx.line_items)]
     return [(None, tx.tax_code)]
-
-
-def _account_lines(
-    tx: BatchTransaction,
-) -> list[tuple[Optional[int], Optional[str], Optional[Decimal]]]:
-    if tx.line_items:
-        return [
-            (idx + 1, item.account_code, item.amount)
-            for idx, item in enumerate(tx.line_items)
-        ]
-    return [(None, tx.current_account_code, tx.amount)]
 
 
 def _lines_with_account_and_tax(
@@ -857,159 +847,6 @@ def _find_invoice_direct_deposits(
     )
 
 
-_FIXED_ASSET_TYPES = frozenset({"FIXED", "FIXEDASSET"})
-
-
-def _find_low_cost_fixed_assets(
-    transactions: list[BatchTransaction],
-    coa_type_lookup: dict[str, str],
-    coa_lookup: dict[str, str],
-    settings: AuditSettings = DEFAULT_SETTINGS,
-) -> list[FlaggedIssue]:
-    """Flag a transaction line posted to a FIXED-ASSET account for an amount BELOW
-    the capitalisation threshold (``low_cost_asset_max``, default £10k). Such
-    items should usually be expensed, not capitalised.
-
-    Pure deterministic — account TYPE + line AMOUNT only. No contact, no date, no
-    LLM (so it always runs, even when the LLM is unavailable).
-    """
-    threshold = settings.low_cost_asset_max
-    flagged: list[FlaggedIssue] = []
-    for tx in transactions:
-        currency = (tx.currency_code or "GBP").strip().upper()
-        symbol = "£" if currency == "GBP" else f"{currency} "
-        for line_no, code, amount in _account_lines(tx):
-            code = (code or "").strip()
-            if not code or amount is None:
-                continue
-            if (coa_type_lookup.get(code) or "").strip().upper() not in _FIXED_ASSET_TYPES:
-                continue
-            amt = abs(amount)
-            if amt <= 0 or amt >= threshold:
-                continue
-            name = coa_lookup.get(code) or code
-            flagged.append(FlaggedIssue(
-                transaction_id=tx.transaction_id,
-                issue_type="low_cost_fixed_asset",
-                severity="medium",
-                message=(
-                    f"{tx.vendor_name}: {symbol}{amt:.2f} posted to fixed-asset "
-                    f"account {code} ({name}) — below the {symbol}{threshold:.0f} "
-                    f"capitalisation threshold; consider expensing instead."
-                )[:200],
-                current_code=code,
-                # No suggested_code on purpose → the UI shows a "?" because there
-                # is no single correct target account; ``reasoning`` explains why
-                # and ``recode_to_account_type`` tells the UI which accounts to
-                # offer in the manual-fix dropdown.
-                reasoning=(
-                    f"This line sits in {code} ({name}) — a fixed-asset account — "
-                    f"but {symbol}{amt:.2f} is below your {symbol}{threshold:.0f} "
-                    f"capitalisation threshold, so it is usually too small to "
-                    f"capitalise. Recommended: re-code it to an EXPENSE account. "
-                    f"There is no single correct expense account, so this is a "
-                    f"suggestion to review (hence the '?'), not a one-click fix — "
-                    f"pick the expense account that fits."
-                ),
-                match_reasons={
-                    "line_no": line_no,
-                    "account_code": code,
-                    "account_name": name,
-                    "current_account_type": "FIXED",
-                    "line_amount": f"{amt:.2f}",
-                    "threshold": f"{threshold:.2f}",
-                    "currency": currency,
-                    # The fix is directional: a too-cheap fixed asset should be
-                    # EXPENSED. Frontend: populate the re-code dropdown with the
-                    # EXPENSE accounts from /coding-options/.
-                    "recommended_action": "expense",
-                    "recode_to_account_type": "EXPENSE",
-                },
-            ))
-    return flagged
-
-
-_CAPITAL_REVIEW_KEYWORDS = ("repair", "maintenance", "printing", "stationery")
-
-
-def _find_capital_items(
-    transactions: list[BatchTransaction],
-    coa_lookup: dict[str, str],
-    coa_type_lookup: dict[str, str],
-    settings: AuditSettings = DEFAULT_SETTINGS,
-) -> list[FlaggedIssue]:
-    """Mirror of low_cost_fixed_asset: a line posted to a MONITORED EXPENSE
-    account for an amount ABOVE the threshold (``capital_item_threshold``) — it
-    may really be a capital item (fixed asset) mis-coded to an expense (e.g. a
-    £90k laptop booked to Repairs & Maintenance instead of Computer Equipment).
-
-    Monitored = the codes in ``capital_monitored_accounts`` when set, else any
-    EXPENSE-type account whose name looks capital-suspicious (repairs / printing
-    / maintenance / stationery). Pure deterministic — account + amount, no LLM.
-    """
-    threshold = settings.capital_item_threshold
-    monitored = {c.strip().upper() for c in settings.capital_monitored_accounts if c.strip()}
-    flagged: list[FlaggedIssue] = []
-    for tx in transactions:
-        currency = (tx.currency_code or "GBP").strip().upper()
-        symbol = "£" if currency == "GBP" else f"{currency} "
-        for line_no, code, amount in _account_lines(tx):
-            code = (code or "").strip()
-            if not code or amount is None:
-                continue
-            name = coa_lookup.get(code) or code
-            if monitored:
-                if code.upper() not in monitored:
-                    continue
-            else:
-                # name-keyword fallback, restricted to P&L EXPENSE accounts so we
-                # never flag a balance-sheet line.
-                if (coa_type_lookup.get(code) or "").strip().upper() not in _EXPENSE_ACCOUNT_TYPES:
-                    continue
-                if not any(k in name.lower() for k in _CAPITAL_REVIEW_KEYWORDS):
-                    continue
-            amt = abs(amount)
-            if amt <= threshold:
-                continue
-            flagged.append(FlaggedIssue(
-                transaction_id=tx.transaction_id,
-                issue_type="capital_item_review",
-                severity="medium",
-                message=(
-                    f"{tx.vendor_name}: {symbol}{amt:.2f} posted to expense account "
-                    f"{code} ({name}) — above the {symbol}{threshold:.0f} threshold; "
-                    f"may be a capital item (fixed asset), not an expense."
-                )[:200],
-                current_code=code,
-                # Mirror of low_cost_fixed_asset: no single correct target →
-                # "?" in the UI, ``reasoning`` explains it, ``recode_to_account_type``
-                # tells the UI which accounts to offer in the fix dropdown.
-                reasoning=(
-                    f"This line sits in {code} ({name}) — an expense account — "
-                    f"but {symbol}{amt:.2f} is above your {symbol}{threshold:.0f} "
-                    f"threshold, so it may really be a capital item that should be "
-                    f"a FIXED asset (capitalised + depreciated), not expensed in "
-                    f"one go. Recommended: review and, if it is an asset, re-code "
-                    f"it to a fixed-asset account. There is no single correct "
-                    f"target, so this is a suggestion to review (hence the '?')."
-                ),
-                match_reasons={
-                    "line_no": line_no,
-                    "account_code": code,
-                    "account_name": name,
-                    "current_account_type": "EXPENSE",
-                    "line_amount": f"{amt:.2f}",
-                    "threshold": f"{threshold:.2f}",
-                    "currency": currency,
-                    # Directional fix: a too-big expense may be a CAPITAL item.
-                    # Frontend: offer FIXED-asset accounts from /coding-options/.
-                    "recommended_action": "capitalise",
-                    "recode_to_account_type": "FIXED",
-                },
-            ))
-    return flagged
-
-
 def _is_vague_account(code: Optional[str], coa_lookup: dict[str, str], extra_codes: frozenset[str]) -> bool:
     clean = (code or "").strip()
     return bool(clean and (clean.upper() in extra_codes or any(keyword in (coa_lookup.get(clean) or "").lower() for keyword in _VAGUE_ACCOUNT_NAME_KEYWORDS)))
@@ -1241,52 +1078,6 @@ def _find_purchase_tax_on_invoices(
                     match_reasons=_tax_direction_reasons(clean, net, tax_amt),
                 ))
                 break
-    return flagged
-
-
-def _find_undocumented_bills(
-    transactions: list[BatchTransaction],
-    settings: AuditSettings = DEFAULT_SETTINGS,
-) -> list[FlaggedIssue]:
-    """Xenon Undocumented Bills: a supplier BILL (or, via the 'Show direct
-    payments' toggle, a Money Out) with NO attachment in Xero (HasAttachments
-    False). Filters: minimum amount, tax-only, and ignored contacts. Money Out
-    is always flagged here; the frontend hides it by default (exclude_bank_items)."""
-    ignore_contacts = frozenset(
-        c.strip().upper() for c in (settings.undocumented_ignore_contacts or ()) if c
-    )
-    flagged: list[FlaggedIssue] = []
-    for tx in transactions:
-        doc_type = (tx.type or "").strip().upper()
-        is_bill = doc_type == "ACCPAY"
-        if not (is_bill or doc_type in _MONEY_OUT_TYPES):
-            continue
-        # Only flag when we KNOW there is no attachment. None = not fetched → skip
-        # (never flag on missing data).
-        if tx.has_attachments is not False:
-            continue
-        contact = (tx.contact_id or "").strip().upper()
-        name = (tx.vendor_name or "").strip().upper()
-        if (contact and contact in ignore_contacts) or (name and name in ignore_contacts):
-            continue
-        if abs(tx.amount) < settings.undocumented_min_amount:
-            continue
-        if settings.undocumented_tax_only and not (tx.tax_total and abs(tx.tax_total) > 0):
-            continue
-        reasons: dict = {
-            "net_amount": f"{abs(tx.amount):.2f}",
-            "currency": (tx.currency_code or "GBP").strip().upper(),
-        }
-        if tx.tax_total is not None:
-            reasons["tax_amount"] = f"{abs(tx.tax_total):.2f}"
-        flagged.append(FlaggedIssue(
-            transaction_id=tx.transaction_id,
-            issue_type="undocumented_bill",
-            severity="medium",
-            message=(f"{tx.vendor_name}: {'bill' if is_bill else 'payment'} "
-                     f"£{abs(tx.amount):.2f} has no attachment in Xero.")[:140],
-            match_reasons=reasons,
-        ))
     return flagged
 
 
