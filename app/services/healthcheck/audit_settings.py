@@ -309,33 +309,9 @@ _SETTINGS_META: tuple[SettingField, ...] = (
                  "sales and old purchase credit checks.",
                  unit="days", min=1, max=365, step=1),
     # --- Bill or Direct Payment -------------------------------------------
-    SettingField("bill_direct_window_days", "Bank & Reconciliation", "bill_direct_payment",
-                 "Direct payment within … of bill", "int",
-                 "Match an unpaid bill with a direct bank payment to the same "
-                 "supplier dated at most this many days after the bill "
-                 "(default 30).",
-                 unit="days", min=1, max=365, step=1),
     # --- Invoice or Direct Deposit ----------------------------------------
-    SettingField("invoice_direct_window_days", "Bank & Reconciliation", "invoice_direct_deposit",
-                 "Direct deposit within … of invoice", "int",
-                 "Match an unpaid invoice with a direct bank deposit from the "
-                 "same customer dated at most this many days after the invoice "
-                 "(default 30).",
-                 unit="days", min=1, max=365, step=1),
     # --- Opening Balance Differences --------------------------------------
-    SettingField("opening_balance_min_difference", "Bank & Reconciliation", "opening_balance_difference",
-                 "Minimum difference to flag", "amount",
-                 "Smallest |Net Assets filed at Companies House − Net Assets in "
-                 "Xero| (at the same period end) that raises an issue. Default £1 "
-                 "ignores negligible rounding differences.",
-                 unit="£", min=0, step=1),
     # --- Bank Balance Check -----------------------------------------------
-    SettingField("bank_balance_tolerance", "Bank & Reconciliation", "bank_balance_check",
-                 "Tolerance", "amount",
-                 "Smallest |Per Bank Statement − Per Xero TB| that flags a bank "
-                 "account at the selected period end. Default £0.01 catches any "
-                 "real gap; raise it to ignore tiny rounding differences.",
-                 unit="£", min=0, step=0.01),
     # --- Inactive contacts ------------------------------------------------
     SettingField("inactive_days", "Contacts", "inactive_contact",
                  "Inactive if no transaction for … ", "int",

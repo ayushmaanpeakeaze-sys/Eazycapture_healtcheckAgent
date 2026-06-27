@@ -47,11 +47,13 @@ from app.checks.tax import (
     _find_sales_tax_on_bills,
     _find_unexpected_tax_codes,
 )
-from app.checks.duplicates import _find_duplicate_bills
-from app.services.healthcheck.deterministic import (
+from app.checks.bank import (
     _find_bill_direct_payments,
     _find_invoice_direct_deposits,
     _find_opening_balance_differences,
+)
+from app.checks.duplicates import _find_duplicate_bills
+from app.services.healthcheck.deterministic import (
     _inspect_transaction,
 )
 from app.modules.ai.checks_llm import (

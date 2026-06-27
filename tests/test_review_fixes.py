@@ -6,11 +6,11 @@ from decimal import Decimal
 
 from app.schemas.transaction import BatchLineItem, BatchTransaction
 from app.checks.coding import _find_multi_account_suppliers
+from app.checks.bank import _find_opening_balance_differences
 from app.checks.tax import _find_multi_tax_code_suppliers
 from app.services.healthcheck.deterministic import (
     _build_contact_alias,
     _contact_key,
-    _find_opening_balance_differences,
 )
 
 _COA = {"420": "Telephone", "421": "Travel", "9999": "Opening Balance Conversion"}

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.checks.bank import META as _BANK_META
 from app.checks.coding import META as _CODING_META
 from app.checks.documents import META as _DOCUMENTS_META
 from app.checks.duplicates import META as _DUPLICATES_META
@@ -20,14 +21,7 @@ from app.checks.tax import META as _TAX_META
 
 # group → list of (key, label, built)
 _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
-    "Bank & Reconciliation": [
-        ("unprocessed_bank", "Unprocessed bank", False),
-        ("unreconciled_bank", "Unreconciled bank (Received/Spent)", True),
-        ("bank_balance_check", "Bank balance check", True),
-        ("opening_balance_difference", "Opening balance differences", True),
-        ("bill_direct_payment", "Bill paid directly (vs unpaid bill)", True),
-        ("invoice_direct_deposit", "Invoice paid directly (vs unpaid invoice)", True),
-    ],
+    "Bank & Reconciliation": list(_BANK_META),
     "Duplicates": list(_DUPLICATES_META),
     "Tax & VAT": list(_TAX_META),
     "Categorisation & Coding": list(_CODING_META),
