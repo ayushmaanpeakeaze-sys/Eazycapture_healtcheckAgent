@@ -22,10 +22,10 @@ from app.checks.coding import (
     _find_multi_account_suppliers,
     find_amount_outlier_candidates,
 )
+from app.checks.duplicates import _find_duplicate_bills
 from app.checks.tax import _find_purchase_tax_missing
 from app.services.healthcheck.deterministic import (
     _check_old_unpaid,
-    _find_duplicate_bills,
 )
 
 _TODAY = date.today()

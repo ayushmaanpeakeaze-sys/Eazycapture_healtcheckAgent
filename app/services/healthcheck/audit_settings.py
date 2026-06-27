@@ -277,36 +277,7 @@ from app.checks.base import (  # noqa: E402
 # and the /audit-config/ responses pick them up automatically.
 _SETTINGS_META: tuple[SettingField, ...] = (
     # --- Duplicate invoices -----------------------------------------------
-    SettingField("duplicate_days_window", "Duplicates", "duplicate_invoice",
-                 "Date within", "int",
-                 "How many days apart the two documents may be dated. 0 (default) "
-                 "= same issue date only; increase to 1, 2, … to allow that many "
-                 "days apart.",
-                 unit="days", min=0, max=365, step=1),
-    SettingField("duplicate_require_exact_reference", "Duplicates", "duplicate_invoice",
-                 "Require exact reference", "bool",
-                 "Both must share the same invoice reference (RAW exact, case-sensitive)."),
-    SettingField("duplicate_require_same_amount", "Duplicates", "duplicate_invoice",
-                 "Require same amount", "bool",
-                 "Both must have the same total value."),
-    SettingField("duplicate_also_check_paid", "Duplicates", "duplicate_invoice",
-                 "Also check paid invoices", "bool",
-                 "Include already-paid invoices in matching."),
-    SettingField("duplicate_min_confidence", "Duplicates", "duplicate_invoice",
-                 "Confidence", "percent",
-                 "How sure we are it's a duplicate. Keep at 90% — it shows "
-                 "duplicates precisely (only near-certain matches). Lower it only "
-                 "to review weaker possible matches.",
-                 min=0, max=1, step=0.05),
     # --- Duplicate contacts -----------------------------------------------
-    SettingField("dup_contact_name_sim", "Duplicates", "duplicate_contact",
-                 "Minimum name similarity", "percent",
-                 "How similar two contact NAMES must be to flag a possible "
-                 "duplicate (Xenon default 70%). Raise it to surface only very "
-                 "close matches; lower it to catch looser ones. Matching is "
-                 "name-only — VAT / email / phone are shown to help you decide, "
-                 "not used to match.",
-                 min=0, max=1, step=0.05),
     # --- Old unpaid invoices (customer / ACCREC) --------------------------
     SettingField("old_unpaid_invoice_days", "Date & Ageing", "old_unpaid_invoice",
                  "Flag once … days overdue", "int",

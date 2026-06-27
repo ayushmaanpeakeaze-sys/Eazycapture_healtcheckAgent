@@ -14,6 +14,7 @@ from typing import Any
 
 from app.checks.coding import META as _CODING_META
 from app.checks.documents import META as _DOCUMENTS_META
+from app.checks.duplicates import META as _DUPLICATES_META
 from app.checks.fixed_assets import META as _FIXED_ASSETS_META
 from app.checks.tax import META as _TAX_META
 
@@ -27,12 +28,7 @@ _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
         ("bill_direct_payment", "Bill paid directly (vs unpaid bill)", True),
         ("invoice_direct_deposit", "Invoice paid directly (vs unpaid invoice)", True),
     ],
-    "Duplicates": [
-        ("duplicate_invoice", "Duplicate invoices", True),
-        ("duplicate_bill", "Duplicate bills", True),
-        ("duplicate_credit_note", "Duplicate credit notes", True),
-        ("duplicate_contact", "Duplicate contacts", True),
-    ],
+    "Duplicates": list(_DUPLICATES_META),
     "Tax & VAT": list(_TAX_META),
     "Categorisation & Coding": list(_CODING_META),
     "Date & Ageing": [
