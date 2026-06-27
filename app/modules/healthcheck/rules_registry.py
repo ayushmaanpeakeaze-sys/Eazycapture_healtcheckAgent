@@ -12,8 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.checks.approval import META as _APPROVAL_META
 from app.checks.bank import META as _BANK_META
 from app.checks.coding import META as _CODING_META
+from app.checks.contacts import META as _CONTACTS_META
+from app.checks.dates import META as _DATES_META
 from app.checks.documents import META as _DOCUMENTS_META
 from app.checks.duplicates import META as _DUPLICATES_META
 from app.checks.fixed_assets import META as _FIXED_ASSETS_META
@@ -25,22 +28,9 @@ _GROUPS: dict[str, list[tuple[str, str, bool]]] = {
     "Duplicates": list(_DUPLICATES_META),
     "Tax & VAT": list(_TAX_META),
     "Categorisation & Coding": list(_CODING_META),
-    "Date & Ageing": [
-        ("future_dated", "Future-dated documents", True),
-        ("old_unpaid_bill", "Overdue bills (we owe)", True),
-        ("old_unpaid_invoice", "Overdue invoices (we're owed)", True),
-        ("old_unsettled_sales_credit", "Old sales credit notes", True),
-        ("old_unsettled_purchase_credit", "Old purchase credit notes", True),
-    ],
-    "Approval & Status": [
-        ("unapproved_invoice", "Unapproved invoices", True),
-        ("unapproved_bill", "Unapproved bills", True),
-    ],
-    "Contacts": [
-        ("missing_vendor", "Missing vendor", True),
-        ("contact_defaults", "Contact defaults missing", True),
-        ("inactive_contact", "Inactive contacts", True),
-    ],
+    "Date & Ageing": list(_DATES_META),
+    "Approval & Status": list(_APPROVAL_META),
+    "Contacts": list(_CONTACTS_META),
     "Document Integrity": list(_DOCUMENTS_META),
     "Fixed Assets": list(_FIXED_ASSETS_META),
     "Currency": [

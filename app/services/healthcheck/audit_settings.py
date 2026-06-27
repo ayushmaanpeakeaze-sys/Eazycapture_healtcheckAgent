@@ -279,53 +279,14 @@ _SETTINGS_META: tuple[SettingField, ...] = (
     # --- Duplicate invoices -----------------------------------------------
     # --- Duplicate contacts -----------------------------------------------
     # --- Old unpaid invoices (customer / ACCREC) --------------------------
-    SettingField("old_unpaid_invoice_days", "Date & Ageing", "old_unpaid_invoice",
-                 "Flag once … days overdue", "int",
-                 "With the default 'due date' basis: how many days PAST the due "
-                 "date before a customer invoice is flagged. 1 = flag as soon as "
-                 "it is a day overdue. (If basis = invoice date, this is days "
-                 "since the invoice was raised instead.)",
-                 unit="days", min=1, max=365, step=1),
-    SettingField("old_unpaid_age_basis", "Date & Ageing", "old_unpaid_invoice",
-                 "Age measured from", "select",
-                 "Measure overdue from the DUE date (default — the due date "
-                 "already includes the 20/30-day terms, so even 1 day past it is "
-                 "overdue) or from the invoice date (Xenon-style ageing — days "
-                 "since it was raised). Applies to both old-unpaid checks.",
-                 options=("due_date", "invoice_date")),
     # --- Old unpaid bills (supplier / ACCPAY) -----------------------------
-    SettingField("old_unpaid_bill_days", "Date & Ageing", "old_unpaid_bill",
-                 "Flag once … days overdue", "int",
-                 "With the default 'due date' basis: how many days PAST the due "
-                 "date before a supplier bill is flagged. 1 = flag as soon as it "
-                 "is a day overdue.",
-                 unit="days", min=1, max=365, step=1),
     # --- Old sales / purchase credit notes (unallocated) ------------------
-    SettingField("credit_age_days", "Date & Ageing", "old_unsettled_sales_credit",
-                 "Credit note is at least … days old", "int",
-                 "Flag a sales or purchase credit note that still has unallocated "
-                 "credit (RemainingCredit > 0) and is at least this many days old "
-                 "(by credit-note date). Xenon default 60. Applies to both old "
-                 "sales and old purchase credit checks.",
-                 unit="days", min=1, max=365, step=1),
     # --- Bill or Direct Payment -------------------------------------------
     # --- Invoice or Direct Deposit ----------------------------------------
     # --- Opening Balance Differences --------------------------------------
     # --- Bank Balance Check -----------------------------------------------
     # --- Inactive contacts ------------------------------------------------
-    SettingField("inactive_days", "Contacts", "inactive_contact",
-                 "Inactive if no transaction for … ", "int",
-                 "Flag a contact whose most recent transaction is at least this "
-                 "many days old (or that has never transacted). Default 180.",
-                 unit="days", min=1, max=1095, step=1),
     # --- Unapproved invoices / bills (DRAFT or SUBMITTED) ------------------
-    SettingField("unapproved_grace_days", "Approval & Status", "unapproved_invoice",
-                 "Invoice is at least … days old", "int",
-                 "Only show an unapproved (DRAFT or SUBMITTED) invoice/bill once "
-                 "it is at least this many days old, measured from the invoice "
-                 "date. Xenon default 0 = surface every unapproved document "
-                 "immediately. Applies to both unapproved invoices and bills.",
-                 unit="days", min=0, max=365, step=1),
     # Fixed-asset checks' settings moved to app/checks/fixed_assets.py
     # (aggregated via collect_category_setting_fields()).
     # --- Misallocated items (vague account + material amount) -------------
