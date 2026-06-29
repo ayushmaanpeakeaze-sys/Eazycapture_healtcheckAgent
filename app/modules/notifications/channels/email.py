@@ -40,11 +40,14 @@ class SmtpEmailChannel(NotificationChannel):
     name = "email"
 
     def __init__(self) -> None:
-        self._host = settings.SMTP_HOST
+        self._host = settings.SMTP_HOST.strip()
         self._port = settings.SMTP_PORT
-        self._username = settings.SMTP_USERNAME
-        self._password = settings.SMTP_PASSWORD
-        self._from = settings.SMTP_FROM or settings.SMTP_USERNAME
+        self._username = settings.SMTP_USERNAME.strip()
+        # Gmail shows app passwords as "abcd efgh ijkl mnop" but rejects them
+        # if the spaces are sent — strip all whitespace so a pasted-with-spaces
+        # app password still authenticates.
+        self._password = "".join((settings.SMTP_PASSWORD or "").split())
+        self._from = (settings.SMTP_FROM or settings.SMTP_USERNAME).strip()
         self._use_ssl = settings.SMTP_SSL
         self._use_starttls = settings.SMTP_STARTTLS
 

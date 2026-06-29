@@ -77,3 +77,54 @@ def invite_email(
 </html>"""
 
     return Message(subject=subject, body_text=body_text, body_html=body_html)
+
+
+def signup_otp_email(*, code: str, expires_minutes: int) -> Message:
+    """Email-verification code for self-service signup."""
+    app = settings.APP_NAME
+
+    subject = f"{code} is your {app} verification code"
+
+    body_text = (
+        f"Your {app} verification code is {code}.\n\n"
+        f"Enter it to finish creating your workspace. It expires in "
+        f"{expires_minutes} minutes.\n\n"
+        f"If you didn't request this, you can safely ignore this email.\n"
+    )
+
+    body_html = f"""\
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 0;">
+      <tr><td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0"
+               style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e6e8eb;">
+          <tr><td style="padding:28px 32px 8px 32px;">
+            <div style="font-size:18px;font-weight:700;color:#5b21b6;">{app}</div>
+          </td></tr>
+          <tr><td style="padding:8px 32px 0 32px;">
+            <h1 style="font-size:20px;color:#111827;margin:8px 0 4px 0;">Verify your email</h1>
+            <p style="font-size:14px;line-height:22px;color:#374151;margin:8px 0;">
+              Enter this code to finish creating your workspace.
+            </p>
+          </td></tr>
+          <tr><td align="center" style="padding:12px 32px 8px 32px;">
+            <div style="display:inline-block;background:#f3f0ff;color:#5b21b6;font-size:30px;
+                        font-weight:700;letter-spacing:8px;padding:14px 24px;border-radius:10px;">
+              {code}
+            </div>
+          </td></tr>
+          <tr><td style="padding:8px 32px 28px 32px;">
+            <p style="font-size:12px;line-height:18px;color:#6b7280;margin:12px 0 0 0;">
+              This code expires in {expires_minutes} minutes. If you didn't request
+              it you can safely ignore this email.
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>"""
+
+    return Message(subject=subject, body_text=body_text, body_html=body_html)

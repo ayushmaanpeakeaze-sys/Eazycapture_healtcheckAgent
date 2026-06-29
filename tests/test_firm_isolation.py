@@ -8,8 +8,11 @@ plus the self-service ``/auth/register`` flow.
 """
 from __future__ import annotations
 
+import json
 import uuid
+from types import SimpleNamespace
 from typing import AsyncIterator
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -18,6 +21,7 @@ from fastapi import HTTPException
 from app.core.auth import CurrentUser
 from app.core.db import AsyncSessionLocal
 from app.core.multi_tenant import allowed_company_ids_for, get_current_company_id
+from app.core.redis_client import get_redis
 from app.main import app
 from app.modules.auth.models import Firm, User
 from app.modules.healthcheck.models import Company
@@ -150,3 +154,49 @@ async def test_register_creates_isolated_firm(async_client: httpx.AsyncClient):
                     firm = await db.get(Firm, user.firm_id)
                     if firm is not None:
                         await db.delete(firm)  # cascades the user
+
+
+async def test_signup_otp_flow(async_client: httpx.AsyncClient):
+    """request-otp stashes a code; the right code creates the firm, a wrong one
+    is rejected, and the code is single-use."""
+    email = f"otp-{uuid.uuid4()}@test.local"
+    fake_send = AsyncMock(return_value=SimpleNamespace(ok=True, channel="console", detail=None))
+    with patch("app.modules.auth.routers.notification_service.send", new=fake_send):
+        r = await async_client.post(
+            "/api/v1/auth/register/request-otp",
+            json={"email": email, "password": "supersecret123", "firm_name": "OTP Firm"},
+        )
+    assert r.status_code == 200, r.text
+    assert fake_send.await_count == 1  # an email was attempted
+
+    raw = await get_redis().get(f"signup:otp:{email}")
+    assert raw is not None
+    code = json.loads(raw)["code"]
+
+    # Wrong code is rejected (and doesn't burn the real one).
+    if code != "000000":
+        bad = await async_client.post(
+            "/api/v1/auth/register/verify", json={"email": email, "code": "000000"},
+        )
+        assert bad.status_code == 400, bad.text
+
+    ok = await async_client.post(
+        "/api/v1/auth/register/verify", json={"email": email, "code": code},
+    )
+    assert ok.status_code == 201, ok.text
+    user_id = uuid.UUID(ok.json()["user_id"])
+
+    try:
+        # Single-use: the code is gone after a successful verify.
+        again = await async_client.post(
+            "/api/v1/auth/register/verify", json={"email": email, "code": code},
+        )
+        assert again.status_code == 400
+    finally:
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                user = await db.get(User, user_id)
+                if user is not None:
+                    firm = await db.get(Firm, user.firm_id)
+                    if firm is not None:
+                        await db.delete(firm)

@@ -15,10 +15,13 @@ Two roles only — admin and team_member:
 """
 from __future__ import annotations
 
+import json
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,17 +48,21 @@ from app.modules.auth.schemas import (
     InviteResponse,
     LoginRequest,
     MeResponse,
+    OtpRequestedResponse,
     RegisterRequest,
     RemoveResponse,
+    RequestOtpRequest,
     TokenResponse,
     UserListResponse,
     UserSummary,
+    VerifyOtpRequest,
 )
+from app.core.redis_client import get_redis
 from app.modules.auth.models import Firm, User, UserCompanyAccess
 from app.modules.healthcheck.models import Company
 from app.modules.notifications import DeliveryResult, Recipient, notification_service
 from app.modules.notifications.persistence import record_send
-from app.modules.notifications.templates import invite_email
+from app.modules.notifications.templates import invite_email, signup_otp_email
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -200,45 +207,159 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
 # Register (self-service signup → new firm + its first admin)
 # ---------------------------------------------------------------------------
 
+_OTP_TTL_SECONDS = 600          # codes are valid for 10 minutes
+_OTP_MAX_ATTEMPTS = 5           # wrong tries before the code is burned
+_OTP_KEY = "signup:otp:{email}"
+
+
+async def _email_taken(db: AsyncSession, email: str) -> bool:
+    return (
+        await db.execute(select(User.id).where(User.email == email))
+    ).scalar_one_or_none() is not None
+
+
+async def _create_firm_and_admin(
+    db: AsyncSession,
+    *,
+    email: str,
+    password_hash: str,
+    full_name: str | None,
+    firm_name: str | None,
+) -> User:
+    """Create a workspace and its first (admin) user. The caller has already
+    confirmed the email is free."""
+    name = (firm_name or "").strip() or f"{email.split('@')[0]}'s workspace"
+    firm = Firm(name=name)
+    db.add(firm)
+    await db.flush()  # firm.id
+    user = User(
+        firm_id=firm.id,
+        email=email,
+        full_name=(full_name or "").strip() or None,
+        role="admin",
+        status="active",
+        company_access_mode="all",
+        password_hash=password_hash,
+    )
+    db.add(user)
+    await db.commit()
+    return user
+
+
+def _token_for(user: User) -> TokenResponse:
+    token = create_access_token(user_id=user.id, email=user.email, role=user.role)
+    return TokenResponse(
+        access_token=token, role=user.role, user_id=user.id, email=user.email,
+    )
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     """Create a new firm (workspace) + its first admin, then sign them in.
 
-    Each signup is an isolated tenant: the new admin only ever sees their own
-    firm's team and Xero orgs.
+    Direct (unverified) signup. The email-verified flow is
+    ``/register/request-otp`` → ``/register/verify``; this stays for
+    programmatic use.
     """
     email = payload.email.strip().lower()
+    if await _email_taken(db, email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+    user = await _create_firm_and_admin(
+        db,
+        email=email,
+        password_hash=hash_password(payload.password),
+        full_name=payload.full_name,
+        firm_name=payload.firm_name,
+    )
+    return _token_for(user)
 
-    existing = (
-        await db.execute(select(User.id).where(User.email == email))
-    ).scalar_one_or_none()
-    if existing is not None:
+
+@router.post("/register/request-otp", response_model=OtpRequestedResponse)
+async def register_request_otp(
+    payload: RequestOtpRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> OtpRequestedResponse:
+    """Step 1 of email-verified signup: email a 6-digit code and hold the
+    (hashed) signup details in Redis until the code is confirmed."""
+    email = payload.email.strip().lower()
+    if await _email_taken(db, email):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists.",
         )
 
-    firm_name = (payload.firm_name or "").strip() or f"{email.split('@')[0]}'s workspace"
-    firm = Firm(name=firm_name)
-    db.add(firm)
-    await db.flush()  # firm.id
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    record = {
+        "code": code,
+        "password_hash": hash_password(payload.password),
+        "full_name": payload.full_name,
+        "firm_name": payload.firm_name,
+        "attempts": 0,
+    }
+    await redis.set(_OTP_KEY.format(email=email), json.dumps(record), ex=_OTP_TTL_SECONDS)
 
-    user = User(
-        firm_id=firm.id,
+    delivery = await notification_service.send(
+        recipient=Recipient(email=email, name=payload.full_name),
+        message=signup_otp_email(code=code, expires_minutes=_OTP_TTL_SECONDS // 60),
+    )
+    return OtpRequestedResponse(
+        email=email, expires_in_seconds=_OTP_TTL_SECONDS, email_sent=delivery.ok,
+    )
+
+
+@router.post("/register/verify", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register_verify(
+    payload: VerifyOtpRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> TokenResponse:
+    """Step 2: a matching code creates the firm + admin and signs them in."""
+    email = payload.email.strip().lower()
+    key = _OTP_KEY.format(email=email)
+    raw = await redis.get(key)
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your code has expired. Please start signup again.",
+        )
+    record = json.loads(raw)
+
+    if record.get("attempts", 0) >= _OTP_MAX_ATTEMPTS:
+        await redis.delete(key)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many incorrect codes. Please start signup again.",
+        )
+
+    if payload.code.strip() != record.get("code"):
+        record["attempts"] = record.get("attempts", 0) + 1
+        await redis.set(key, json.dumps(record), keepttl=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect code. Please try again.",
+        )
+
+    # The email may have been registered between step 1 and step 2.
+    if await _email_taken(db, email):
+        await redis.delete(key)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    user = await _create_firm_and_admin(
+        db,
         email=email,
-        full_name=(payload.full_name or "").strip() or None,
-        role="admin",
-        status="active",
-        company_access_mode="all",
-        password_hash=hash_password(payload.password),
+        password_hash=record["password_hash"],
+        full_name=record.get("full_name"),
+        firm_name=record.get("firm_name"),
     )
-    db.add(user)
-    await db.commit()
-
-    token = create_access_token(user_id=user.id, email=user.email, role=user.role)
-    return TokenResponse(
-        access_token=token, role=user.role, user_id=user.id, email=user.email,
-    )
+    await redis.delete(key)
+    return _token_for(user)
 
 
 # ---------------------------------------------------------------------------

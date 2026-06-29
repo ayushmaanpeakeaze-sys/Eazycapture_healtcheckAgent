@@ -51,6 +51,29 @@ class RegisterRequest(BaseModel):
         return _normalize_email(v)
 
 
+class RequestOtpRequest(RegisterRequest):
+    """Step 1 of email-verified signup — same fields as register; we hold them
+    until the emailed code is confirmed."""
+
+
+class OtpRequestedResponse(BaseModel):
+    email: str
+    expires_in_seconds: int
+    email_sent: bool
+
+
+class VerifyOtpRequest(BaseModel):
+    """Step 2 — the code from the email creates the firm + admin."""
+
+    email: str = Field(..., max_length=255)
+    code: str = Field(..., min_length=4, max_length=8)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _normalize_email(v)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
