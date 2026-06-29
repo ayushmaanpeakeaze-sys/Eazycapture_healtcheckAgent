@@ -1740,6 +1740,19 @@ def reenrich_missing_task(
     ``{"row_id": ..., "document_id": ..., "row": {transaction_id,
     rule_ids, messages, transaction, flagged_items}}``.
     """
+    # No AI provider when LLM checks are disabled — skip rather than fire a
+    # burst of enrich-row calls that would only fail. Keeps every "refresh" /
+    # re-enrich path free of Groq when LLM_CHECKS_ENABLED is off.
+    if not settings.LLM_CHECKS_ENABLED:
+        logger.info(
+            "[SuHe][Reenrich] LLM checks disabled — skipping re-enrichment for "
+            "%d row(s)", len(rows_payload),
+        )
+        return {
+            "processed": 0, "enriched": 0, "failed": 0,
+            "skipped": len(rows_payload), "reason": "llm_disabled",
+        }
+
     rows_processed = 0
     rows_enriched = 0
     rows_failed = 0
