@@ -1,0 +1,143 @@
+# Render Blueprint — one-file deploy of the EazyCapture AI Agent.
+#
+# Provisions everything and wires it together:
+#   • eazycapture-api    (web)    — FastAPI, public
+#   • eazycapture-worker (worker) — Celery worker (audits, sync, enrichment)
+#   • eazycapture-beat   (worker) — Celery beat (nightly sync + KPI snapshot)
+#   • eazycapture-db     (Postgres)
+#   • eazycapture-redis  (Redis / Key Value — cache + Celery broker)
+#
+# Deploy: Render Dashboard → New → Blueprint → connect this repo → Apply.
+# Then set the three secret env vars (marked `sync: false`) in the dashboard.
+# Auto-deploys on every push to the connected branch (this is your CD).
+
+databases:
+  - name: eazycapture-db
+    databaseName: healthcheck_poc
+    user: hcpoc
+    plan: free            # upgrade to a paid plan for production (free expires)
+
+services:
+  # --- Redis (cache + Celery broker/result backend) ---
+  # If your Render account uses the newer "Key Value" type, change `redis` →
+  # `keyvalue` below (the rest is identical).
+  - type: redis
+    name: eazycapture-redis
+    plan: free
+    ipAllowList: []        # internal-only; no public access
+
+  # --- API (FastAPI) ---
+  - type: web
+    name: eazycapture-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    preDeployCommand: alembic upgrade head     # migrate before each release
+    envVars:
+      - fromGroup: eazycapture-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eazycapture-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+
+  # --- Celery worker (background jobs) ---
+  - type: worker
+    name: eazycapture-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    dockerCommand: celery -A app.core.celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - fromGroup: eazycapture-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eazycapture-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+      # The worker calls the rules/LLM endpoints on the API service. `host`
+      # gives the API's hostname; the app prepends https:// + derives the paths.
+      - key: HEALTHCHECK_AI_BASE_URL
+        fromService:
+          type: web
+          name: eazycapture-api
+          property: host
+
+  # --- Celery beat (scheduler: nightly Xero sync + KPI snapshot) ---
+  - type: worker
+    name: eazycapture-beat
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    dockerCommand: celery -A app.core.celery_app beat --loglevel=info
+    envVars:
+      - fromGroup: eazycapture-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eazycapture-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: eazycapture-redis
+          property: connectionString
+
+# Shared config reused by api / worker / beat.
+envVarGroups:
+  - name: eazycapture-shared
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: AUDIT_SOURCE
+        value: db                 # read audits from the synced DB tables
+      - key: LLM_CHECKS_ENABLED
+        value: "false"            # fast audits; deterministic checks only
+      - key: HEALTHCHECK_AI_ENABLED
+        value: "true"             # AI insights + suggest-fix on
+      - key: AUTH_DISABLED
+        value: "false"
+      - key: JWT_SECRET
+        generateValue: true       # Render auto-generates a strong secret
+      # --- secrets: set these in the Render dashboard (never committed) ---
+      - key: GROQ_API_KEY
+        sync: false
+      - key: NANGO_SECRET_KEY
+        sync: false
+      - key: NANGO_WEBHOOK_SECRET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false               # your frontend origin(s), comma-separated

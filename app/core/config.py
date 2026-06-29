@@ -105,6 +105,34 @@ def _as_origins(raw: str) -> tuple[str, ...]:
     return tuple(o.strip() for o in raw.split(",") if o.strip())
 
 
+def _normalize_async_db_url(url: str) -> str:
+    """Ensure the URL uses the async (asyncpg) driver.
+
+    Managed Postgres providers (Render, Heroku, …) hand out
+    ``postgres://`` / ``postgresql://`` connection strings, which SQLAlchemy
+    would route to a SYNC driver. The async engine needs ``+asyncpg``, so add
+    it when missing (the Alembic helper later swaps it for psycopg)."""
+    url = url.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+    return url
+
+
+def _ai_base_url() -> str:
+    """Base URL of the rules/LLM endpoints the worker calls. A managed host
+    (e.g. Render's ``fromService`` host) may arrive without a scheme — assume
+    HTTPS. Trailing slash stripped so paths append cleanly."""
+    raw = os.environ.get("HEALTHCHECK_AI_BASE_URL", "http://127.0.0.1:8001").strip()
+    if raw and "://" not in raw:
+        raw = "https://" + raw
+    return raw.rstrip("/")
+
+
+_AI_BASE = _ai_base_url()
+
+
 def _load() -> Settings:
     return Settings(
         # --- existing ---
@@ -117,10 +145,10 @@ def _load() -> Settings:
         HEALTHCHECK_AI_TTL_SECONDS=int(os.environ.get("HEALTHCHECK_AI_TTL_SECONDS", "2592000")),
         CORS_ALLOWED_ORIGINS=_as_origins(os.environ.get("CORS_ALLOWED_ORIGINS", "")),
         # --- POC ---
-        DATABASE_URL=os.environ.get(
+        DATABASE_URL=_normalize_async_db_url(os.environ.get(
             "DATABASE_URL",
             "postgresql+asyncpg://hcpoc:hcpoc@127.0.0.1:5434/healthcheck_poc",
-        ),
+        )),
         CELERY_BROKER_URL=os.environ.get(
             "CELERY_BROKER_URL",
             "redis://:peakeaze-redis@127.0.0.1:6379/1",
@@ -129,20 +157,21 @@ def _load() -> Settings:
             "CELERY_RESULT_BACKEND",
             "redis://:peakeaze-redis@127.0.0.1:6379/2",
         ),
-        HEALTHCHECK_AI_BASE_URL=os.environ.get(
-            "HEALTHCHECK_AI_BASE_URL", "http://127.0.0.1:8001",
+        # The worker calls these on the API service. Set only HEALTHCHECK_AI_BASE_URL
+        # (the API's URL) and the three endpoints derive from it; each can still be
+        # overridden individually if needed.
+        HEALTHCHECK_AI_BASE_URL=_AI_BASE,
+        HEALTHCHECK_AI_BATCH_URL=(
+            os.environ.get("HEALTHCHECK_AI_BATCH_URL")
+            or f"{_AI_BASE}/api/v1/health-check/batch"
         ),
-        HEALTHCHECK_AI_BATCH_URL=os.environ.get(
-            "HEALTHCHECK_AI_BATCH_URL",
-            "http://127.0.0.1:8001/api/v1/health-check/batch",
+        HEALTHCHECK_AI_ENRICH_URL=(
+            os.environ.get("HEALTHCHECK_AI_ENRICH_URL")
+            or f"{_AI_BASE}/api/v1/enrich-audit"
         ),
-        HEALTHCHECK_AI_ENRICH_URL=os.environ.get(
-            "HEALTHCHECK_AI_ENRICH_URL",
-            "http://127.0.0.1:8001/api/v1/enrich-audit",
-        ),
-        HEALTHCHECK_AI_SUGGEST_FIX_URL=os.environ.get(
-            "HEALTHCHECK_AI_SUGGEST_FIX_URL",
-            "http://127.0.0.1:8001/api/v1/suggest-fix",
+        HEALTHCHECK_AI_SUGGEST_FIX_URL=(
+            os.environ.get("HEALTHCHECK_AI_SUGGEST_FIX_URL")
+            or f"{_AI_BASE}/api/v1/suggest-fix"
         ),
         HEALTHCHECK_AI_TIMEOUT_MS=int(os.environ.get("HEALTHCHECK_AI_TIMEOUT_MS", "600000")),
         HEALTHCHECK_AI_ENRICH_TIMEOUT_MS=int(os.environ.get("HEALTHCHECK_AI_ENRICH_TIMEOUT_MS", "5000")),

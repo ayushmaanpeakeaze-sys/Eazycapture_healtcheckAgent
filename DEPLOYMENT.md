@@ -27,6 +27,48 @@ current before anything serves traffic. In-container DB/Redis URLs are
 overridden to use service names (`postgres`, `redis`) while `.env` keeps the
 `127.0.0.1` URLs for running uvicorn directly on your machine.
 
+## Deploy to Render (one-click blueprint)
+
+The repo ships a [`render.yaml`](render.yaml) blueprint that provisions and
+wires the whole stack. **Every push to the connected branch auto-deploys
+(this is the CD that pairs with the CI in `.github/workflows/ci.yml`).**
+
+**Steps:**
+
+1. Push this repo to GitHub (already done).
+2. Render Dashboard → **New** → **Blueprint** → connect this repo → **Apply**.
+   Render reads `render.yaml` and creates:
+   | Service | Role |
+   |---|---|
+   | `eazycapture-api` | FastAPI (public URL) |
+   | `eazycapture-worker` | Celery worker (audits, sync, enrichment) |
+   | `eazycapture-beat` | Celery beat (nightly sync + KPI snapshot) |
+   | `eazycapture-db` | managed PostgreSQL |
+   | `eazycapture-redis` | managed Redis (cache + Celery broker) |
+3. Set the **secret** env vars (marked `sync: false`) in the dashboard — these
+   are never committed:
+   - `GROQ_API_KEY`
+   - `NANGO_SECRET_KEY`
+   - `NANGO_WEBHOOK_SECRET`
+   - `CORS_ALLOWED_ORIGINS` — your frontend origin(s), comma-separated
+   (`JWT_SECRET` is auto-generated; `DATABASE_URL` / `REDIS_URL` / Celery URLs
+   are wired automatically from the DB + Redis services.)
+4. First deploy runs `alembic upgrade head` automatically (`preDeployCommand`).
+
+**After it's live:**
+
+- The API has a public URL (e.g. `https://eazycapture-api.onrender.com`). Point
+  the **Nango webhook** at `…/api/v1/webhooks/nango` — no tunnel/ngrok needed.
+- Set `AUDIT_SOURCE=db` (already in the blueprint) — audits read the synced
+  tables, so they're fast and survive a dead live token.
+
+**Notes:**
+
+- The `free` Postgres/Redis/web plans are fine for a demo but spin down on
+  inactivity and the free DB expires — move to paid plans for production.
+- If your Render account uses the newer **Key Value** product, change
+  `type: redis` → `type: keyvalue` in `render.yaml`.
+
 ## Environments
 
 `APP_ENV` selects the environment: `development` (default) | `staging` |
