@@ -115,15 +115,18 @@ async def sync_connections(
             content={"detail": "Nango is not configured on this deployment."},
         )
     integration = IntegrationService()
+    # Scope to THIS user's connection: the connect-session stamped it with their
+    # id, so we never adopt another firm's connection.
+    end_user_id = str(user.user_id) if user.user_id else None
     try:
-        live = await integration.find_live_xero_connection()
+        live = await integration.find_live_xero_connection(end_user_id=end_user_id)
     except Exception:  # noqa: BLE001 — detection is best-effort
         live = None
     if not live:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={
-                "detail": "No live Xero connection found — connect Xero first."
+                "detail": "No live Xero connection found for your account — connect Xero first."
             },
         )
     connection_id, _tenant = live

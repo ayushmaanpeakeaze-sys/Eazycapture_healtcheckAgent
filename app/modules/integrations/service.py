@@ -47,10 +47,14 @@ class IntegrationService:
             and (tenant_id or "").strip()
         )
 
-    async def find_live_xero_connection(self) -> Optional[tuple[str, str]]:
+    async def find_live_xero_connection(
+        self, end_user_id: Optional[str] = None,
+    ) -> Optional[tuple[str, str]]:
         """Newest live Xero connection (connection_id, tenant_id) in Nango, or
-        None — for self-healing a stale stored connection-id."""
-        return await self._nango.find_live_xero_connection()
+        None — for self-healing a stale stored connection-id. When
+        ``end_user_id`` is given, the lookup is scoped to that user's
+        connections only (firm isolation)."""
+        return await self._nango.find_live_xero_connection(end_user_id=end_user_id)
 
     # ------------------------------------------------------------------
     # Documents

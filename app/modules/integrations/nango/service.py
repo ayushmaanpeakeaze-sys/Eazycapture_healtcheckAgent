@@ -21,6 +21,18 @@ logger = logging.getLogger("eazycapture.nango.service")
 _LOG_TAG = "[SuHe][Nango]"
 
 
+def _connection_end_user_id(cn: dict) -> str:
+    """The end-user id stamped on a Nango connection at connect-session time.
+    Checks the ``end_user.id`` object and the ``tags.end_user_id`` mirror."""
+    eu = cn.get("end_user")
+    if isinstance(eu, dict) and eu.get("id"):
+        return str(eu["id"]).strip()
+    tags = cn.get("tags")
+    if isinstance(tags, dict) and tags.get("end_user_id"):
+        return str(tags["end_user_id"]).strip()
+    return ""
+
+
 class NangoService:
     """High-level Nango operations used by the rest of the app."""
 
@@ -33,11 +45,18 @@ class NangoService:
         to decide between the real path and the seed/stub fallback."""
         return self._client._is_enabled()
 
-    async def find_live_xero_connection(self) -> Optional[tuple[str, str]]:
+    async def find_live_xero_connection(
+        self, end_user_id: Optional[str] = None,
+    ) -> Optional[tuple[str, str]]:
         """Newest live Xero connection ``(connection_id, tenant_id)`` in Nango, or
         None. Lets an audit SELF-HEAL when a company's stored connection-id has
         gone stale — the Nango free plan mints a brand-new connection-id on every
-        reconnect, leaving the company row pointing at a dead one."""
+        reconnect, leaving the company row pointing at a dead one.
+
+        When ``end_user_id`` is given, ONLY that end-user's connections are
+        considered. The connect-session stamps every connection with the
+        authenticated user's id, so this scopes the lookup to the caller — one
+        firm can never pick up another firm's connection."""
         c = self._client
         if not c._is_enabled():
             return None
@@ -50,6 +69,9 @@ class NangoService:
             cn for cn in conns
             if (cn.get("provider_config_key") or cn.get("provider")) == self._provider_config_key
         ]
+        if end_user_id is not None:
+            want = str(end_user_id).strip()
+            xero = [cn for cn in xero if _connection_end_user_id(cn) == want]
         if not xero:
             return None
         xero.sort(key=lambda cn: cn.get("created") or cn.get("created_at") or "", reverse=True)

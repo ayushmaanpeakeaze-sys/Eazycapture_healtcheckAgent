@@ -425,8 +425,19 @@ def _fetch_audit_transactions(
             # company pointing at a dead one. Find the live Xero connection and,
             # if it's different, repoint the company + retry ONCE.
             healed = None
+            # Scope the heal to THIS company's firm — never adopt another firm's
+            # live connection. (Unscoped only for firm-less/legacy companies.)
+            heal_eu = None
+            if getattr(company, "firm_id", None) is not None:
+                heal_eu = db.execute(
+                    select(User.id).where(
+                        User.firm_id == company.firm_id,
+                        User.nango_connection_id.isnot(None),
+                    ).limit(1)
+                ).scalar_one_or_none()
             try:
-                live = asyncio.run(integration.find_live_xero_connection())
+                live = asyncio.run(integration.find_live_xero_connection(
+                    end_user_id=str(heal_eu) if heal_eu else None))
             except Exception:        # noqa: BLE001 — detection is best-effort
                 live = None
             if live and (live[0] != company.nango_connection_id
