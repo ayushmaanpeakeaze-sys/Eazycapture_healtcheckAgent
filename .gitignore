@@ -37,3 +37,7 @@ celerybeat-schedule
 celerybeat-schedule.*
 demo/
 docs/
+DUPLICATE_INVOICES_GUIDE.md
+FRONTEND_DUPLICATE_SETTINGS.md
+FRONTEND_EMAIL_INTEGRATION.md
+SCRUM_BRIEF.md
