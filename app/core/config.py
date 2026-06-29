@@ -79,6 +79,10 @@ class Settings:
     SMTP_FROM: str
     SMTP_STARTTLS: bool   # True for port 587 (default), False for SSL
     SMTP_SSL: bool        # True for implicit SSL on port 465
+    # Resend (HTTP email API) — preferred when set, since it sends over HTTPS
+    # and works where outbound SMTP is blocked (e.g. Railway).
+    RESEND_API_KEY: str
+    RESEND_FROM: str
     # Used to build the accept-invite link inside the email — point this at
     # the frontend origin + route that handles invite acceptance.
     APP_NAME: str
@@ -200,6 +204,8 @@ def _load() -> Settings:
         SMTP_FROM=os.environ.get("SMTP_FROM", ""),
         SMTP_STARTTLS=_as_bool(os.environ.get("SMTP_STARTTLS", "true")),
         SMTP_SSL=_as_bool(os.environ.get("SMTP_SSL", "false")),
+        RESEND_API_KEY=os.environ.get("RESEND_API_KEY", ""),
+        RESEND_FROM=os.environ.get("RESEND_FROM", "onboarding@resend.dev"),
         APP_NAME=os.environ.get("APP_NAME", "EazyCapture"),
         APP_BASE_URL=os.environ.get("APP_BASE_URL", "http://localhost:5173"),
         ACCEPT_INVITE_PATH=os.environ.get("ACCEPT_INVITE_PATH", "/accept-invite"),
