@@ -14,7 +14,7 @@ import * as z from 'zod';
  * lineItems is applied verbatim to the Xero invoice object, so the caller sends
  * Xero-cased field names (Status, etc.). Xero updates are a POST of the document.
  *
- * ⚠️ Xero line-item gotcha: a POST with `LineItems` REPLACES all lines — the
+ * Xero line-item gotcha: a POST with `LineItems` REPLACES all lines — the
  * caller must send the FULL line set (changed + unchanged), not just the edited
  * line, or the others are dropped.
  */

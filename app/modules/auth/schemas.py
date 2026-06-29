@@ -123,7 +123,7 @@ class UserSummary(_Base):
     created_at: datetime
     assigned_company_ids: list[UUID] = Field(default_factory=list)
     # Last email delivery status: sent | delivered | bounced | complained |
-    # failed | None. UI shows a ⚠️ on bounced/complained (bad address).
+    # failed | None. UI shows a on bounced/complained (bad address).
     email_status: Optional[str] = None
 
 

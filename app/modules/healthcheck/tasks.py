@@ -391,10 +391,10 @@ def _fetch_audit_transactions(
         company.nango_connection_id, company.xero_tenant_id,
     )
 
-    # DB-backed source (AUDIT_SOURCE=db): read the mirrored Xero data from our
-    # synced tables instead of a live fetch — the whole point of the sync. Gated
-    # on an initial sync having run; otherwise fall through to the live path
-    # (which self-heals the connection / seeds), so a never-synced org still works.
+    # DB-backed source (AUDIT_SOURCE=db): read the mirrored Xero data from the
+    # synced tables instead of a live fetch. Gated on an initial sync having run;
+    # otherwise fall through to the live path (which self-heals the connection /
+    # seeds), so a never-synced org still works.
     if (
         settings.AUDIT_SOURCE == "db"
         and use_nango

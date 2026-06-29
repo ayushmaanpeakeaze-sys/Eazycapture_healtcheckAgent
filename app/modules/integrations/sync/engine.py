@@ -77,7 +77,7 @@ def parse_xero_datetime(value: Any) -> Optional[datetime]:
 
 def format_if_modified_since(dt: datetime) -> str:
     """Watermark datetime → the string Xero's If-Modified-Since expects
-    (UTC, ``YYYY-MM-DDTHH:MM:SS``). Verified live: future date → 0 rows."""
+    (UTC, ``YYYY-MM-DDTHH:MM:SS``)."""
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 

@@ -64,9 +64,9 @@ async def _live_xero_connection() -> tuple[str, str] | None:
             connection_id=cid, provider_config_key=settings.NANGO_XERO_INTEGRATION_ID,
             endpoint="api.xro/2.0/Invoices", tenant_id=tenant, params={"page": 1},
         )
-        print(f"[refresh] Live connection {cid} ✓ (Xero responding)")
+        print(f"[refresh] Live connection {cid} (Xero responding)")
     except Exception as exc:  # noqa: BLE001
-        print(f"[refresh] ⚠ connection {cid} reachable but Xero call failed "
+        print(f"[refresh] connection {cid} reachable but Xero call failed "
               f"({type(exc).__name__}) — repointing anyway; reconnect if the audit fails.")
     return cid, tenant
 

@@ -44,21 +44,21 @@ hundreds of unit tests that run with no server and no database.
 
 ```
 app/
-├── core/        🔧 Shared infrastructure
+├── core/        Shared infrastructure
 │                   db.py · config.py · auth.py · celery_app.py ·
 │                   redis_client.py · multi_tenant.py
 │
-├── schemas/     📋 Pydantic data shapes (e.g. BatchTransaction)
+├── schemas/     Pydantic data shapes (e.g. BatchTransaction)
 │
-├── checks/      ✅ The check rules, one module per category
+├── checks/      The check rules, one module per category
 │                   bank · tax · coding · dates · duplicates · approval ·
 │                   contacts · documents · fixed_assets
 │
-├── services/    🧠 Pure business logic — NO web, NO framework deps
+├── services/    Pure business logic — NO web, NO framework deps
 │   ├── healthcheck/   the audit ENGINE (orchestrator + deterministic checks)
 │   └── insights/      KPI computation
 │
-├── modules/     🌐 The web/domain layer — FastAPI routers + DB models + Celery tasks
+├── modules/     The web/domain layer — FastAPI routers + DB models + Celery tasks
 │   ├── auth/             users, login, JWT
 │   ├── healthcheck/      audit domain: models, routers, tasks, domain services
 │   ├── integrations/     external systems
@@ -68,7 +68,7 @@ app/
 │   ├── insights/        KPI snapshots
 │   └── notifications/   email
 │
-└── api/         🚪 The stateless rules/LLM endpoints (e.g. /health-check/batch)
+└── api/         The stateless rules/LLM endpoints (e.g. /health-check/batch)
 
 alembic/         Database migrations
 tests/           Test suite (runs against Postgres + Redis)
