@@ -918,7 +918,10 @@ def _persist_trapped(
                  if transaction.get("line_items") else None)
                 or transaction.get("description") or ""
             ).strip()[:200] or None,
-            "reference": (transaction.get("description") or "").strip()[:200] or None,
+            # "Reference" column = the Xero Reference field (e.g. "DUP-BILL-99",
+            # a PO number) — NOT the line description. For bills this is the
+            # human identifier (bills have no invoice number).
+            "reference": (transaction.get("reference") or "").strip()[:200] or None,
             "xero_reference": (transaction.get("reference") or "").strip() or None,
             "invoice_status": (transaction.get("status") or "").strip().upper() or None,
         }
