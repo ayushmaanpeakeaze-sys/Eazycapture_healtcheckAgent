@@ -76,14 +76,29 @@ def sync_company_task(
         cid = UUID(str(company_id))
     except (ValueError, TypeError):
         return {"status": "error", "error": f"bad company_id {company_id!r}"}
-    result = asyncio.run(
-        _run_company_sync(cid, force_full=full, entities=entities)
-    )
-    logger.info(
-        "[Sync] task done company=%s status=%s records=%s",
-        company_id, result.get("status"), result.get("total_records"),
-    )
-    return result
+    try:
+        result = asyncio.run(
+            _run_company_sync(cid, force_full=full, entities=entities)
+        )
+        logger.info(
+            "[Sync] task done company=%s status=%s records=%s",
+            company_id, result.get("status"), result.get("total_records"),
+        )
+        return result
+    finally:
+        # Clear the in-progress flag the refresh-data endpoint set, so
+        # /sync-status flips to ``syncing=false`` the instant this finishes (or
+        # errors) — the Refresh button keys off that for exact, instant feedback.
+        try:
+            import redis as _redis_sync
+            from app.core.config import settings as _settings
+            _redis_sync.from_url(
+                _settings.REDIS_URL, decode_responses=True
+            ).delete(f"sync:active:{company_id}")
+        except Exception:
+            logger.warning(
+                "[Sync] could not clear sync:active flag for %s", company_id
+            )
 
 
 @celery_app.task(name="healthcheck.sync_all_xero", bind=False, max_retries=0)

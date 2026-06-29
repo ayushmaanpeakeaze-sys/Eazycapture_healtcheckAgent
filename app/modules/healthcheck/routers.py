@@ -134,14 +134,31 @@ async def refresh_data(
 ) -> dict[str, object]:
     """The "Refresh Data" action — enqueue an incremental sync of this org's Xero
     data (invoices, bills, bank txns, credit notes, contacts, accounts, tax
-    rates) into our DB. Fire-and-forget; poll ``/sync-status`` for progress."""
+    rates) into our DB. Fire-and-forget; poll ``/sync-status`` for progress.
+
+    Sets a short-lived ``sync:active:{company}`` flag so ``/sync-status`` can
+    report ``syncing: true`` immediately (the Refresh button keys off this for
+    instant, exact feedback instead of guessing from timestamps). The flag also
+    de-dupes rapid taps — a second tap while a sync is running is a no-op. The
+    worker clears the flag when it finishes; the 10-min TTL is a safety net so a
+    crashed worker can never wedge the button on ``syncing`` forever."""
     from app.modules.integrations.sync.tasks import sync_company_task
 
+    redis = get_redis()
+    key = f"sync:active:{company_id}"
+    started = await redis.set(key, "1", nx=True, ex=300)
+    if not started:
+        return {
+            "status": "already_syncing",
+            "company_id": str(company_id),
+            "syncing": True,
+        }
     sync_company_task.delay(str(company_id), full=full)
     return {
         "status": "queued",
         "company_id": str(company_id),
         "mode": "full" if full else "incremental",
+        "syncing": True,
     }
 
 
@@ -347,9 +364,17 @@ async def sync_status(
     any_synced = any(
         v["last_sync_at"] for v in entities.values()
     )
+    # Explicit in-progress signal so the Refresh button stops the instant a sync
+    # finishes (no timestamp-watching, no multi-minute spin). True while the
+    # refresh-data flag is held OR any entity is mid-fetch.
+    redis = get_redis()
+    syncing = bool(await redis.exists(f"sync:active:{company_id}")) or any(
+        v["status"] == "in_progress" for v in entities.values()
+    )
     return {
         "company_id": str(company_id),
         "synced": any_synced,
+        "syncing": syncing,
         "entities": entities,
     }
 
