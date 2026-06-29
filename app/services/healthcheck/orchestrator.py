@@ -175,8 +175,8 @@ async def run_batch_health_check(
     flagged.extend(category_issues)
     flagged.extend(capital_issues)  # always empty — capital is deterministic now
     flagged.extend(anomaly_issues)
-    # Capital checks (both deterministic — account + amount, no LLM). Per Xenon
-    # these run over invoices, bills AND bank items (Money In / Money Out), so
+    # Capital checks (both deterministic — account + amount, no LLM). Per the
+    # spec these run over invoices, bills AND bank items (Money In / Money Out), so
     # they get ``transactions + bank_transactions``:
     #   • low_cost_fixed_asset  — FIXED-asset line BELOW the capitalisation
     #     threshold → too cheap to capitalise, should be expensed.
@@ -194,7 +194,7 @@ async def run_batch_health_check(
     flagged.extend(_find_duplicate_bills(transactions, None, settings))
     flagged.extend(_find_opening_balance_differences(transactions, coa_lookup))
     flagged.extend(_find_direction_mismatches(transactions, coa_type_lookup))
-    # Multi-Account Suppliers (Xenon): checks the contact's bill line items AND
+    # Multi-Account Suppliers: checks the contact's bill line items AND
     # Money-Out bank payments → gets invoices/bills PLUS bank transactions.
     flagged.extend(_find_multi_account_suppliers(transactions + bank_transactions, coa_lookup, contact_alias, settings))
     flagged.extend(_find_multi_tax_code_suppliers(transactions + bank_transactions, contact_alias, settings))
@@ -206,7 +206,7 @@ async def run_batch_health_check(
     flagged.extend(_find_bill_direct_payments(transactions, bank_transactions, settings))
     # Invoice-or-Direct-Deposit: unpaid invoice matched to a direct RECEIVE deposit.
     flagged.extend(_find_invoice_direct_deposits(transactions, bank_transactions, settings))
-    # Misallocated Items (Xenon): vague-account line over the threshold — checks
+    # Misallocated Items: vague-account line over the threshold — checks
     # bills/invoices AND Money In / Money Out → gets bank transactions too.
     flagged.extend(_find_misallocated_items(transactions + bank_transactions, coa_lookup, settings))
     # Undocumented Bills: supplier bill (or Money Out) with no Xero attachment.
@@ -216,7 +216,7 @@ async def run_batch_health_check(
     # org is explicitly flagged non-VAT; run as before when unknown (None).
     org_vat = context.org_is_vat_registered if context else None
     if org_vat is not False:
-        # Tax-missing (Xenon): account-TYPE driven, so they get invoices/bills PLUS
+        # Tax-missing: account-TYPE driven, so they get invoices/bills PLUS
         # Money In/Out — the account-type filter routes income lines to sales and
         # expense lines to purchase.
         tax_universe = transactions + bank_transactions

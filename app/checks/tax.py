@@ -8,12 +8,12 @@ their registry entries are listed in META.
 Truly-shared helpers (``_dominant``, ``_contact_key``, ``_tax_lines``,
 ``_lines_with_account_and_tax``) stay in ``deterministic`` and are imported
 lazily inside the functions that need them — avoids the package import cycle.
-Xenon's tax checks have no tunable settings (no gear), so SETTING_FIELDS is empty.
+The tax checks have no tunable settings (no gear), so SETTING_FIELDS is empty.
 """
 from __future__ import annotations
 
 from collections import defaultdict
-from decimal import Decimal  # noqa: F401  (kept for parity / future use)
+from decimal import Decimal  # noqa: F401  (kept for future use)
 from typing import Optional
 
 from app.schemas.transaction import BatchTransaction, FlaggedIssue
@@ -67,7 +67,7 @@ def _tax_lines_with_amounts(
     tx: BatchTransaction,
 ) -> list[tuple[Optional[int], Optional[str], Optional[Decimal], Optional[Decimal]]]:
     """(line_no, tax_code, net_amount, tax_amount) per line — for the wrong-tax
-    checks, which surface the Net + Tax columns Xenon shows."""
+    checks, which surface the Net + Tax columns shown."""
     if tx.line_items:
         return [
             (i + 1, li.tax_code, li.amount, li.tax_amount)
@@ -104,7 +104,7 @@ def _find_tax_missing(
     *,
     ignore_name_keywords: tuple[str, ...] = (),
 ) -> list[FlaggedIssue]:
-    """Xenon tax-missing: a line on an in-scope account (Sales/Income for sales,
+    """Tax-missing: a line on an in-scope account (Sales/Income for sales,
     Expense/Asset for purchase) with a No-VAT / Outside-Scope tax code → flag."""
     from app.services.healthcheck.deterministic import _lines_with_account_and_tax
     ignore_codes = frozenset(
@@ -223,7 +223,7 @@ def _find_multi_tax_code_suppliers(
     contact_alias: Optional[dict[str, str]] = None,
     settings=None,
 ) -> list[FlaggedIssue]:
-    """Xenon Multi-Tax-Code Suppliers: a contact whose postings use MORE THAN ONE
+    """Multi-Tax-Code Suppliers: a contact whose postings use MORE THAN ONE
     tax code (2+ distinct → flag), across every line item of bills + Money-Out."""
     from app.services.healthcheck.deterministic import _contact_key, _dominant, _tax_lines
     alias = contact_alias or {}
@@ -284,7 +284,7 @@ def _find_unexpected_tax_codes(
 
 
 # --- settings + registry -----------------------------------------------------
-SETTING_FIELDS: tuple = ()   # Tax checks have no tunable thresholds (Xenon parity).
+SETTING_FIELDS: tuple = ()   # Tax checks have no tunable thresholds.
 
 META: tuple[tuple[str, str, bool], ...] = (
     ("missing_tax", "Missing tax code (any document)", True),

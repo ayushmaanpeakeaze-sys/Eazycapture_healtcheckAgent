@@ -1,0 +1,10 @@
+# Nango CLI — keep secrets + build/state out of git
+.env
+.env.*
+dist/
+node_modules/
+# .nango/ holds CLI deploy state — Nango recommends committing it, but it can
+# leak environment ids; uncomment to ignore if you prefer not to track it.
+# .nango/
+.nango/
+build/

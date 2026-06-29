@@ -16,7 +16,11 @@ celery_app = Celery(
     "healthcheck_poc",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.modules.healthcheck.tasks", "app.modules.insights.tasks"],
+    include=[
+        "app.modules.healthcheck.tasks",
+        "app.modules.insights.tasks",
+        "app.modules.integrations.sync.tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -41,6 +45,14 @@ celery_app.conf.update(
         "refresh-insight-snapshots": {
             "task": "insights.refresh_all",
             "schedule": crontab(hour=2, minute=30),  # 02:30 UTC daily
+        },
+        # Nightly Xero auto-sync — incrementally pull each connected org's new /
+        # modified records (If-Modified-Since watermark) into the DB so audits
+        # read fresh data without a live fetch. Runs before the insight snapshot
+        # so KPIs compute off the freshly-synced data.
+        "nightly-xero-sync": {
+            "task": "healthcheck.sync_all_xero",
+            "schedule": crontab(hour=2, minute=0),  # 02:00 UTC daily
         },
     },
 )

@@ -1,8 +1,8 @@
-"""Default-based Unexpected Account (Xenon parity, check #25).
+"""Default-based Unexpected Account (check #25).
 
 When per-contact default accounts are supplied, a posting that differs from the
 contact's saved default is flagged (and the default is the suggested fix). With
-no defaults configured, the check is SILENT (Xenon rule) — there is no baseline
+no defaults configured, the check is SILENT (per the spec) — there is no baseline
 to compare against, and frequency-based detection is the separate Multi-Account
 Suppliers check.
 """
@@ -69,7 +69,7 @@ def test_blank_direction_default_silent():
 
 
 def test_silent_without_defaults():
-    # Xenon rule: no defaults configured → nothing is "unexpected", even on a
+    # Per the spec: no defaults configured → nothing is "unexpected", even on a
     # large, heavily-dominated batch (that's the Multi-Account Suppliers check).
     txns = [_tx(str(i), "C1", "400") for i in range(120)]
     txns.append(_tx("odd", "C1", "401"))   # used once
@@ -185,7 +185,7 @@ def test_contact_without_tax_default_silent():
 
 
 def test_tax_silent_without_defaults():
-    # Same Xenon rule for tax codes: no default tax configured → silent.
+    # Same rule for tax codes: no default tax configured → silent.
     txns = [_txt(str(i), "C1", "INPUT2") for i in range(120)]
     txns.append(_txt("odd", "C1", "NONE"))   # used once
     assert _find_unexpected_tax_codes(txns) == []

@@ -18,6 +18,7 @@ export default createAction({
     description: 'List one page of Xero invoices/bills with full line items (AccountCode, amounts, tax).',
     version: '1.0.0',
     input: z.object({
+        tenantId: z.string().optional(),
         page: z.number().int().positive().optional(),
         // Optional Xero filter, e.g. 'Type=="ACCPAY"' or 'Status=="AUTHORISED"'.
         where: z.string().optional(),
@@ -36,7 +37,7 @@ export default createAction({
         // pass it ourselves — read it from the connection metadata (set once via
         // POST /connection/{id}/metadata as { tenant_id }).
         const meta = (await nango.getMetadata()) as { tenant_id?: string } | null;
-        const tenantId = meta?.tenant_id;
+        const tenantId = input.tenantId ?? meta?.tenant_id;
 
         const headers: Record<string, string> = {};
         if (tenantId) headers['xero-tenant-id'] = tenantId;

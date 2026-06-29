@@ -1,4 +1,4 @@
-"""Sales / Purchase Tax Missing (Xenon parity).
+"""Sales / Purchase Tax Missing.
 
 Rule: VAT-registered org + a line on an in-scope account (Sales/Other-Income for
 sales, Expense/Asset for purchase) coded No-VAT / Outside-Scope → flag for review.

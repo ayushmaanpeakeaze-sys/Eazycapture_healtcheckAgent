@@ -1,6 +1,6 @@
 """Misallocated Items — material posting parked in a vague catch-all account.
 
-Deterministic complement to the AI Wrong-Category check (Xenon parity, check #29).
+Deterministic complement to the AI Wrong-Category check (check #29).
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def test_suspense_account_flagged_by_name():
 
 
 def test_money_out_flagged():
-    # Xenon checks Money In / Money Out too: a SPEND to a vague account, over
+    # The check covers Money In / Money Out too: a SPEND to a vague account, over
     # the materiality threshold, is just as much a misallocation as a bill line.
     spend = BatchTransaction(
         transaction_id="bt1", date=date(2026, 1, 1), description="Bike supplies",

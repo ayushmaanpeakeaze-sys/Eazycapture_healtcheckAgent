@@ -10,7 +10,7 @@ Per bank account at a selected period end:
 
 Accounts are flagged when a manual statement balance is present and the
 difference exceeds the tolerance (and the account isn't excluded / marked-OK).
-``show_all`` includes every bank account (Xenon's "Show all bank accounts").
+``show_all`` includes every bank account (the "Show all bank accounts" toggle).
 """
 from __future__ import annotations
 
@@ -76,6 +76,10 @@ class BankBalanceService:
         tb_report = await self._integration.fetch_trial_balance(conn, tenant, period_end)
         gl = _parse_trial_balance_balances(tb_report)   # {account_id: {code, balance}}
 
+        # Note / supporting-doc counts per account for this period end (one
+        # grouped query each — no N+1), so the UI can badge "2 notes · 1 doc".
+        note_counts, doc_counts = await self._annotation_counts(company_id, period_end)
+
         items, total = [], Decimal("0")
         for acc_id, info in bank_accounts.items():
             code = info["code"]
@@ -102,10 +106,45 @@ class BankBalanceService:
                 "per_xero_tb": float(tb_balance) if tb_balance is not None else None,
                 "difference": float(difference) if difference is not None else None,
                 "marked_ok": is_ok,
+                "notes_count": note_counts.get(code, 0),
+                "documents_count": doc_counts.get(code, 0),
                 "process_url": xero_deep_link("BANK", acc_id, shortcode),
             })
         items.sort(key=lambda r: abs(r["difference"] or 0), reverse=True)
         return {"period_end": period_end, "total_value": float(total), "items": items}
+
+    async def _annotation_counts(
+        self, company_id: UUID, period_end: str,
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        from sqlalchemy import func, select
+
+        from app.modules.healthcheck.models import BankDocument, BankNote
+
+        notes = dict(
+            (
+                await self._db.execute(
+                    select(BankNote.account_code, func.count())
+                    .where(
+                        BankNote.company_id == company_id,
+                        BankNote.period_end == period_end,
+                    )
+                    .group_by(BankNote.account_code)
+                )
+            ).all()
+        )
+        docs = dict(
+            (
+                await self._db.execute(
+                    select(BankDocument.account_code, func.count())
+                    .where(
+                        BankDocument.company_id == company_id,
+                        BankDocument.period_end == period_end,
+                    )
+                    .group_by(BankDocument.account_code)
+                )
+            ).all()
+        )
+        return {str(k): int(v) for k, v in notes.items()}, {str(k): int(v) for k, v in docs.items()}
 
     # --- write ------------------------------------------------------------
     async def set_statement_balance(

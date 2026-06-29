@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -252,10 +253,75 @@ class AuditBatch(Base):
     company: Mapped["Company"] = relationship(back_populates="audit_batches")
 
 
+class BankNote(Base):
+    """A note attached to one bank account at one period end (Bank Balance
+    Check). Internal to EazyCapture — never sent to Xero. Team members can be
+    @-tagged via ``tagged_user_ids``."""
+
+    __tablename__ = "bank_note"
+    __table_args__ = (
+        Index("ix_bank_note_lookup", "company_id", "account_code", "period_end"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    account_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    period_end: Mapped[str] = mapped_column(String(16), nullable=False)
+    author_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # User-ids @-tagged in the note (so the UI can notify / render mentions).
+    tagged_user_ids: Mapped[Optional[list[Any]]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
+class BankDocument(Base):
+    """A supporting file (bank statement, reconciliation spreadsheet …) uploaded
+    against one bank account at one period end (Bank Balance Check). Internal to
+    EazyCapture — bytes live in our DB, never sent to Xero."""
+
+    __tablename__ = "bank_document"
+    __table_args__ = (
+        Index("ix_bank_document_lookup", "company_id", "account_code", "period_end"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    account_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    period_end: Mapped[str] = mapped_column(String(16), nullable=False)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # POC storage: the file bytes live in the DB (statements are small). Swap for
+    # object storage (S3/GCS) when volumes grow.
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
 __all__ = [
     "Company",
     "Invoice",
     "InvoiceLineItem",
     "HealthCheckResult",
     "AuditBatch",
+    "BankNote",
+    "BankDocument",
 ]

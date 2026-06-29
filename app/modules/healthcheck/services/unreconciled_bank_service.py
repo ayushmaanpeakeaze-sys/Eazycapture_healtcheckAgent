@@ -38,10 +38,7 @@ class UnreconciledBankService:
         tenant = getattr(company, "xero_tenant_id", None)
         shortcode = getattr(company, "xero_shortcode", None)
 
-        txns = []
-        if self._integration.is_connected(conn, tenant):
-            txns = await self._integration.fetch_all_bank_transactions(conn, tenant) or []
-
+        txns = await self._load_bank_txns(company_id, conn, tenant)
         rows = compute_unreconciled_accounts(txns, exclude_codes=_excluded(cfg))
         total = 0
         for r in rows:
@@ -53,6 +50,41 @@ class UnreconciledBankService:
             "unexplained_available": False,
             "items": rows,
         }
+
+    async def _load_bank_txns(
+        self, company_id: UUID, conn: Optional[str], tenant: Optional[str],
+    ) -> list[dict[str, Any]]:
+        """Bank transactions for the unreconciled count.
+
+        Under ``AUDIT_SOURCE=db`` read the SYNCED rows (same source the main
+        audit uses) so the count is reliable even when the live Xero token has
+        died — the live fetch silently returns 0 on a dead connection, which is
+        exactly what made this check flip to "OK" with stale data. Falls back to
+        a live fetch only when nothing has been synced yet.
+        """
+        from app.core.config import settings as _settings
+
+        if _settings.AUDIT_SOURCE == "db":
+            from sqlalchemy import select as _select
+
+            from app.modules.integrations.sync.models import XeroDocument
+
+            rows = (
+                await self._db.execute(
+                    _select(XeroDocument.raw_json).where(
+                        XeroDocument.company_id == company_id,
+                        XeroDocument.entity == "bank_transaction",
+                    )
+                )
+            ).scalars().all()
+            txns = [r for r in rows if isinstance(r, dict)]
+            if txns:
+                return txns
+            # nothing synced yet → fall through to live
+
+        if self._integration.is_connected(conn, tenant):
+            return await self._integration.fetch_all_bank_transactions(conn, tenant) or []
+        return []
 
     async def exclude_account(self, company_id: UUID, account_code: str, *, excluded: bool) -> None:
         company, cfg = await self._store.load(company_id)

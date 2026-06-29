@@ -101,12 +101,12 @@ def compute_bank_balance_gaps(
     tolerance: Decimal = Decimal("0.01"),
     exclude_codes: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Bank Balance Check (Xenon parity, check #30) — per bank account, flag
+    """Bank Balance Check (check #30) — per bank account, flag
     where the **statement balance** (Xero BankSummary closing balance) differs
     from the **GL balance** (Xero TrialBalance) by more than ``tolerance``.
 
     A non-zero gap = bank work unfinished (something missing or double-counted).
-    Our extra over Xenon: each gap carries that account's ``unreconciled_count``
+    Additionally, each gap carries that account's ``unreconciled_count``
     as the likely root cause.
 
     Pure logic — the caller supplies one dict per bank account, already joined
@@ -118,7 +118,7 @@ def compute_bank_balance_gaps(
          "unreconciled_count": 3}         # optional root-cause hint
 
     Accounts whose code is in ``exclude_codes`` (e.g. a personal/credit-card
-    account) are skipped. Zero-gap accounts are omitted (Xenon hides them).
+    account) are skipped. Zero-gap accounts are omitted (hidden from the user).
     Returns one dict per flagged account, largest absolute gap first.
     """
     excluded = {str(c).strip().upper() for c in (exclude_codes or set())}

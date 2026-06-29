@@ -1,7 +1,7 @@
 """Contact Defaults — list each contact's default account/tax settings, and
 write chosen defaults back to Xero (the "Confirm" button).
 
-Powers the Contact Defaults screen (Xenon parity) and, in turn, the
+Powers the Contact Defaults screen and, in turn, the
 Unexpected-Account / Unexpected-Tax checks. The four defaults are standard Xero
 Contact fields (read + write): SalesDefaultAccountCode, PurchasesDefaultAccountCode,
 AccountsReceivableTaxType, AccountsPayableTaxType.

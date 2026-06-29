@@ -64,6 +64,11 @@ def _company():
 def test_service_attaches_process_url_and_total():
     company = _company()
     db = MagicMock(); db.get = AsyncMock(return_value=company); db.commit = AsyncMock()
+    # Under AUDIT_SOURCE=db the service first reads synced bank txns; make that
+    # read return nothing so it falls through to the (mocked) live fetch this
+    # test exercises.
+    _empty = MagicMock(); _empty.scalars.return_value.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty)
     integ = MagicMock()
     integ.is_connected = MagicMock(return_value=True)
     integ.fetch_all_bank_transactions = AsyncMock(return_value=[

@@ -68,13 +68,19 @@ class IntegrationService:
         Proxy returns the full invoice including line item details.
         """
         from app.core.config import settings
+        use_action = settings.AUDIT_SOURCE == "action"
         documents: list[dict[str, Any]] = []
         for page in range(1, max(1, settings.MAX_NANGO_PAGES) + 1):
-            page_data = await self._nango.fetch_xero_invoices_page(connection_id, tenant_id, page)
+            if use_action:
+                page_data = await self._nango.action_list_invoices_full(
+                    connection_id, tenant_id=tenant_id, page=page)
+            else:
+                page_data = await self._nango.fetch_xero_invoices_page(connection_id, tenant_id, page)
             if not page_data:
                 break
             documents.extend(page_data)
-        logger.info("[Integration] fetched %d invoices via proxy", len(documents))
+        logger.info("[Integration] fetched %d invoices via %s",
+                    len(documents), "action" if use_action else "proxy")
         return documents
 
     async def fetch_all_credit_notes(
@@ -82,15 +88,21 @@ class IntegrationService:
         connection_id: str,
         tenant_id: str,
     ) -> list[dict[str, Any]]:
-        """All credit notes via proxy with pagination (same reason as invoices)."""
+        """All credit notes via proxy/action with pagination (same reason as invoices)."""
         from app.core.config import settings
+        use_action = settings.AUDIT_SOURCE == "action"
         documents: list[dict[str, Any]] = []
         for page in range(1, max(1, settings.MAX_NANGO_PAGES) + 1):
-            page_data = await self._nango.fetch_xero_credit_notes_page(connection_id, tenant_id, page)
+            if use_action:
+                page_data = await self._nango.action_list_credit_notes_full(
+                    connection_id, tenant_id=tenant_id, page=page)
+            else:
+                page_data = await self._nango.fetch_xero_credit_notes_page(connection_id, tenant_id, page)
             if not page_data:
                 break
             documents.extend(page_data)
-        logger.info("[Integration] fetched %d credit notes via proxy", len(documents))
+        logger.info("[Integration] fetched %d credit notes via %s",
+                    len(documents), "action" if use_action else "proxy")
         return documents
 
     async def fetch_all_payments(
@@ -189,6 +201,7 @@ class IntegrationService:
                 connection_id=connection_id,
                 invoice_id=invoice_id,
                 fields={k: v for k, v in action_input.items() if k != "invoiceId"},
+                tenant_id=tenant_id,
             )
             if result is not None:
                 logger.info(
@@ -391,15 +404,21 @@ class IntegrationService:
         Powers the Bank Reconciliation insight (last-reconciled + unreconciled
         count via the ``IsReconciled`` flag)."""
         from app.core.config import settings
+        use_action = settings.AUDIT_SOURCE == "action"
         out: list[dict[str, Any]] = []
         for page in range(1, max(1, settings.MAX_NANGO_PAGES) + 1):
-            page_data = await self._nango.fetch_xero_bank_transactions_page(
-                connection_id, tenant_id, page,
-            )
+            if use_action:
+                page_data = await self._nango.action_list_bank_transactions_full(
+                    connection_id, tenant_id=tenant_id, page=page)
+            else:
+                page_data = await self._nango.fetch_xero_bank_transactions_page(
+                    connection_id, tenant_id, page,
+                )
             if not page_data:
                 break
             out.extend(page_data)
-        logger.info("[Integration] fetched %d bank transactions via proxy", len(out))
+        logger.info("[Integration] fetched %d bank transactions via %s",
+                    len(out), "action" if use_action else "proxy")
         return out
 
     # ------------------------------------------------------------------

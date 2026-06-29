@@ -1,4 +1,4 @@
-"""Duplicate-contacts check (Xenon-style: name similarity + VAT-aware confidence).
+"""Duplicate-contacts check: name similarity + VAT-aware confidence.
 
 The MATCH is driven purely by the normalised contact NAME (≥70% similarity).
 ``confidence`` then adjusts for tax/VAT — boosted when both VATs agree, drastically
@@ -32,7 +32,7 @@ def _pairs(flags):
     return {frozenset((f["contact_id"], f["partner_id"])) for f in flags}
 
 
-# --- Xenon worked examples --------------------------------------------------
+# --- Worked examples --------------------------------------------------------
 
 def test_abc_furniture_suffix_match_100():
     flags = _duplicate_contacts([

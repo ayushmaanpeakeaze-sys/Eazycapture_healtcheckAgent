@@ -83,7 +83,7 @@ def test_no_coa_types_silent():
 
 
 def test_money_out_bank_item_flagged():
-    # Xenon checks Money In / Money Out too. A SPEND (Money Out) of £300 coded to
+    # The check covers Money In / Money Out too. A SPEND (Money Out) of £300 coded to
     # a FIXED-asset account is just as much a low-cost asset as a bill line.
     spend = BatchTransaction(
         transaction_id="bt1", date=date(2026, 1, 1), description="Cheap printer",

@@ -68,7 +68,7 @@ def test_multi_account_cross_contact_merge():
 
 
 def test_multi_account_includes_money_out():
-    # Xenon checks Money Out too: a bill on 420 + a SPEND to the same supplier
+    # The check covers Money Out too: a bill on 420 + a SPEND to the same supplier
     # on 421 → two distinct accounts → flagged.
     spend = BatchTransaction(
         transaction_id="2", date=date(2026, 1, 1), description="x",
@@ -93,7 +93,7 @@ def test_multi_account_reads_all_line_items():
     assert len(_find_multi_account_suppliers([tx], _COA)) == 1
 
 
-# --- Multi-tax-code suppliers (Xenon parity: 2+ distinct tax codes) ----------
+# --- Multi-tax-code suppliers (2+ distinct tax codes) ------------------------
 
 def _tx_tax(tid, cid, tax, dtype="ACCPAY"):
     return BatchTransaction(
@@ -103,7 +103,7 @@ def _tx_tax(tid, cid, tax, dtype="ACCPAY"):
     )
 
 
-def test_multi_tax_pure_xenon_two_distinct():
+def test_multi_tax_pure_two_distinct():
     # One supplier, two distinct tax codes → flagged (the differing one).
     hits = _find_multi_tax_code_suppliers([_tx_tax("1", "C1", "20I"), _tx_tax("2", "C1", "NONE")])
     assert len(hits) == 1

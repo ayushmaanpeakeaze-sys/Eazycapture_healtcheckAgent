@@ -45,6 +45,7 @@ from app.modules.healthcheck.models import (
     HealthCheckResult,
     Invoice,
 )
+from app.modules.integrations.sync import db_read
 from app.modules.healthcheck.services.audit_service import (
     META_FIELD,
     batch_key,
@@ -231,7 +232,7 @@ def _reshape_bank_txn_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
     Only spend/receive money WITH a contact is kept — those are what the
     Unexpected-Account check compares against the contact's default account.
     Transfers / pre- & over-payments and contact-less lines are skipped (nothing
-    to compare → Xenon stays silent on them).
+    to compare → we stay silent on them).
     """
     if not isinstance(raw, dict):
         return None
@@ -292,7 +293,7 @@ def _reshape_bank_txn_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 
 def _payment_and_edit_state(transaction: dict[str, Any]) -> dict[str, Any]:
-    """Compute paid/unpaid status + whether Xenon can edit the line via the API.
+    """Compute paid/unpaid status + whether we can edit the line via the API.
 
     Returns:
         payment_status  — "paid" | "part_paid" | "unpaid" | "settled" (bank txn)
@@ -389,6 +390,25 @@ def _fetch_audit_transactions(
     use_nango = integration.is_connected(
         company.nango_connection_id, company.xero_tenant_id,
     )
+
+    # DB-backed source (AUDIT_SOURCE=db): read the mirrored Xero data from our
+    # synced tables instead of a live fetch — the whole point of the sync. Gated
+    # on an initial sync having run; otherwise fall through to the live path
+    # (which self-heals the connection / seeds), so a never-synced org still works.
+    if (
+        settings.AUDIT_SOURCE == "db"
+        and use_nango
+        and db_read.has_synced_documents(db, company.id)
+    ):
+        docs, raw_bank_txns = db_read.read_documents(db, company.id)
+        shaped = [_reshape_xero_to_batch(raw) for raw in docs]
+        shaped += [_reshape_bank_txn_to_batch(raw) for raw in raw_bank_txns]
+        transactions = [tx for tx in shaped if tx is not None]
+        logger.info(
+            "[SuHe][Audit] Loaded %d doc(s) + %d bank txn(s) from DB sync for company=%s",
+            len(docs), len(raw_bank_txns), company.id,
+        )
+        return transactions, "db"
 
     if use_nango:
         try:
@@ -641,6 +661,41 @@ async def _fetch_xero_org_context(
         return {}
 
 
+def _db_org_context(company_id: UUID) -> dict[str, Any]:
+    """DB-backed twin of ``_fetch_xero_org_context``: read the synced COA, tax
+    rates and organisation from our tables and map them with the SAME functions
+    the live path uses, so the audit context is identical."""
+    try:
+        with SyncSessionLocal() as s:
+            accounts_raw = db_read.read_raw(s, company_id, "account")
+            tax_rates_raw = db_read.read_raw(s, company_id, "tax_rate")
+            org = db_read.read_organisation(s, company_id)
+        coa = _map_xero_accounts(accounts_raw)
+        tax_rates = _map_xero_tax_rates(tax_rates_raw)
+        base_currency = (
+            (org.get("BaseCurrency") or "").strip() if isinstance(org, dict) else ""
+        ) or "GBP"
+        shortcode = (
+            (org.get("ShortCode") or "").strip() if isinstance(org, dict) else ""
+        ) or None
+        logger.info(
+            "[SuHe][Audit] loaded COA (%d accounts), %d tax rates, base_currency=%s "
+            "from DB sync", len(coa), len(tax_rates), base_currency,
+        )
+        return {
+            "coa": coa,
+            "tax_rates": tax_rates,
+            "base_currency": base_currency,
+            "shortcode": shortcode,
+        }
+    except Exception:
+        logger.exception(
+            "[SuHe][Audit] failed to load COA/tax-rates from DB sync — "
+            "falling back to hardcoded fixtures"
+        )
+        return {}
+
+
 def _build_context(
     coa: Optional[list[dict[str, Any]]] = None,
     tax_rates: Optional[list[dict[str, Any]]] = None,
@@ -835,7 +890,7 @@ def _persist_trapped(
             "amount_due": transaction.get("amount_due"),            # precise Paid? + Void gate
             "amount_paid": transaction.get("amount_paid"),
             "reconciled": transaction.get("reconciled"),            # bank-matched (IsReconciled)
-            # paid/unpaid + editability (can Xenon update via the Xero API?):
+            # paid/unpaid + editability (can we update via the Xero API?):
             #   payment_status  — paid | part_paid | unpaid | settled (bank)
             #   editable        — False when reconciled / payment / credit allocated
             #   editable_reason — why not editable (for the "Edit in Xero" hint)
@@ -1126,7 +1181,9 @@ def historical_audit_task(
         # Fetch live COA + tax rates from Xero when connected via Nango.
         # Seed-data runs keep the hardcoded fixtures as fallback.
         org_ctx: dict[str, Any] = {}
-        if source == "nango" and company.nango_connection_id and company.xero_tenant_id:
+        if source == "db":
+            org_ctx = _db_org_context(company_uuid)
+        elif source == "nango" and company.nango_connection_id and company.xero_tenant_id:
             org_ctx = asyncio.run(
                 _fetch_xero_org_context(
                     IntegrationService(),
@@ -1163,7 +1220,14 @@ def historical_audit_task(
         # Contacts come via the Nango proxy (tenant-scoped) so the right
         # org's contacts come back even on a multi-org connection.
         contacts: list[dict[str, Any]] = []
-        if source == "nango" and company.nango_connection_id and company.xero_tenant_id:
+        if source == "db":
+            with SyncSessionLocal() as s:
+                contacts = db_read.read_raw(s, company_uuid, "contact")
+            logger.info(
+                "[SuHe][Audit] loaded %d contacts from DB sync for company=%s",
+                len(contacts), company_id,
+            )
+        elif source == "nango" and company.nango_connection_id and company.xero_tenant_id:
             try:
                 contacts = asyncio.run(
                     IntegrationService().fetch_contacts(
@@ -1186,7 +1250,7 @@ def historical_audit_task(
         # ContactID. The duplicate-contacts CHECK (run_contact_checks below) just
         # surfaces the pairs so the user can Merge/Dismiss them in Xero.
         if contacts:
-            # Contact defaults → default-based Unexpected-Account (Xenon parity).
+            # Contact defaults → default-based Unexpected-Account (per the spec).
             # Only contacts with at least one saved default are sent.
             try:
                 defaults = []

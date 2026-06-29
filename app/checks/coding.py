@@ -69,7 +69,7 @@ def _find_multi_account_suppliers(
     contact_alias: Optional[dict[str, str]] = None,
     settings: AuditSettings = DEFAULT_SETTINGS,
 ) -> list[FlaggedIssue]:
-    """Xenon Multi-Account Suppliers: a contact whose postings span MORE THAN ONE
+    """Multi-Account Suppliers: a contact whose postings span MORE THAN ONE
     account code (pure distinct-count — 2+ distinct → flag). Checked across every
     LINE ITEM of the contact's bills AND Money-Out bank payments — the account
     code lives on the line, not the header. The most-used account is treated as
@@ -90,7 +90,7 @@ def _find_multi_account_suppliers(
     flagged: list[FlaggedIssue] = []
     for key, entries in by_contact.items():
         accounts = [code for _tx, code in entries]
-        if len(set(accounts)) < 2:           # Xenon trigger: 2+ distinct accounts
+        if len(set(accounts)) < 2:           # trigger: 2+ distinct accounts
             continue
         # Whitelisted suppliers are allowed to split across accounts — skip them.
         sample = entries[0][0]
@@ -125,9 +125,9 @@ def _find_unexpected_accounts(
     supplier bills / money OUT).
 
     Covers ACCREC/ACCPAY invoices+bills AND bank transactions (RECEIVE → sales,
-    SPEND → purchase) — exactly the four Xenon transaction types.
+    SPEND → purchase) — exactly the four transaction types.
 
-    Xenon rule: a contact with NO default configured is SILENT — without a
+    Rule: a contact with NO default configured is SILENT — without a
     baseline there is nothing to call "unexpected". Frequency-based detection
     (compare a posting against the contact's OWN history) is the separate
     Multi-Account Suppliers check, deliberately not duplicated here.

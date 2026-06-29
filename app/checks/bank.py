@@ -193,12 +193,9 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
                  "Xero| (at the same period end) that raises an issue. Default £1 "
                  "ignores negligible rounding differences.",
                  unit="£", min=0, step=1),
-    SettingField("bank_balance_tolerance", "Bank & Reconciliation", "bank_balance_check",
-                 "Tolerance", "amount",
-                 "Smallest |Per Bank Statement − Per Xero TB| that flags a bank "
-                 "account at the selected period end. Default £0.01 catches any "
-                 "real gap; raise it to ignore tiny rounding differences.",
-                 unit="£", min=0, step=0.01),
+    # NOTE: Bank Balance Check has NO user-facing tolerance setting (none is
+    # exposed). The check uses a fixed £0.01 floor (any real gap
+    # flags) via AuditSettings.bank_balance_tolerance's default.
 )
 
 META: tuple[tuple[str, str, bool], ...] = (

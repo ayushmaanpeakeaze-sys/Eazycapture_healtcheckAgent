@@ -1,4 +1,4 @@
-"""Old Sales / Purchase Credits (Xenon): a credit note that still has
+"""Old Sales / Purchase Credits: a credit note that still has
 unallocated credit (RemainingCredit > 0) and is at least `credit_age_days`
 (default 60) old, by credit-note date. Sales (ACCRECCREDIT) and purchase
 (ACCPAYCREDIT) are split into separate issue types.

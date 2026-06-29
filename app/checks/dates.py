@@ -21,7 +21,7 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
                  "Age measured from", "select",
                  "Measure overdue from the DUE date (default — the due date "
                  "already includes the 20/30-day terms, so even 1 day past it is "
-                 "overdue) or from the invoice date (Xenon-style ageing — days "
+                 "overdue) or from the invoice date (ageing — days "
                  "since it was raised). Applies to both old-unpaid checks.",
                  options=("due_date", "invoice_date")),
     SettingField("old_unpaid_bill_days", "Date & Ageing", "old_unpaid_bill",
@@ -34,7 +34,7 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
                  "Credit note is at least … days old", "int",
                  "Flag a sales or purchase credit note that still has unallocated "
                  "credit (RemainingCredit > 0) and is at least this many days old "
-                 "(by credit-note date). Xenon default 60. Applies to both old "
+                 "(by credit-note date). Default 60. Applies to both old "
                  "sales and old purchase credit checks.",
                  unit="days", min=1, max=365, step=1),
 )

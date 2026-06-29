@@ -1,4 +1,4 @@
-"""Undocumented Bills (Xenon): a supplier bill (or, with the toggle, a Money Out)
+"""Undocumented Bills: a supplier bill (or, with the toggle, a Money Out)
 with NO attachment in Xero. Filters: minimum amount, tax-only, ignored contacts.
 Flag only when HasAttachments is explicitly False — never on missing data.
 """

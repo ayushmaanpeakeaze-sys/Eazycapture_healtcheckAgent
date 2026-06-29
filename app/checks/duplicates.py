@@ -311,7 +311,7 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
     SettingField("dup_contact_name_sim", "Duplicates", "duplicate_contact",
                  "Minimum name similarity", "percent",
                  "How similar two contact NAMES must be to flag a possible "
-                 "duplicate (Xenon default 70%). Raise it to surface only very "
+                 "duplicate (default 70%). Raise it to surface only very "
                  "close matches; lower it to catch looser ones. Matching is "
                  "name-only — VAT / email / phone are shown to help you decide, "
                  "not used to match.",

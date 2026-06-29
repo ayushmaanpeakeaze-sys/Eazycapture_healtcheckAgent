@@ -90,6 +90,69 @@ async def create_connect_session(
     return payload
 
 
+@router.post(
+    "/api/v1/integrations/nango/sync-connections/",
+    status_code=status.HTTP_200_OK,
+    summary="Webhook-free org creation: build the signed-in user's Xero orgs "
+    "from their live connection. Call right after the OAuth popup closes.",
+)
+async def sync_connections(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Make 'connect → org appears' work WITHOUT the auth.creation webhook.
+
+    The webhook needs a public URL (ngrok in local/demo) which is fragile. This
+    does the same job on demand: find the user's newest live Xero connection,
+    enumerate its orgs, and create/link/sync/audit each — by reusing the exact
+    webhook handler. The frontend calls this on the Nango ``connect`` event, so
+    the org shows up even if the webhook never fires. Idempotent (upserts), so
+    it's safe alongside the webhook.
+    """
+    if not NangoService().is_available():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Nango is not configured on this deployment."},
+        )
+    integration = IntegrationService()
+    try:
+        live = await integration.find_live_xero_connection()
+    except Exception:  # noqa: BLE001 — detection is best-effort
+        live = None
+    if not live:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "detail": "No live Xero connection found — connect Xero first."
+            },
+        )
+    connection_id, _tenant = live
+
+    # Reuse the EXACT webhook logic: upsert one Company per org, link the user,
+    # set the user's connection, kick off initial sync + auto-audit.
+    creation_payload: dict[str, Any] = {
+        "connectionId": connection_id,
+        "endUser": {
+            "endUserId": str(user.user_id) if user.user_id else None,
+        },
+    }
+    await _handle_auth_creation(creation_payload, db)
+
+    orgs = (
+        await db.execute(
+            select(Company.id, Company.name).where(
+                Company.nango_connection_id == connection_id,
+                Company.is_active.is_(True),
+            )
+        )
+    ).all()
+    return {
+        "status": "ok",
+        "connection_id": connection_id,
+        "orgs": [{"company_id": str(cid), "name": name} for cid, name in orgs],
+    }
+
+
 # ---------------------------------------------------------------------
 # Webhook
 # ---------------------------------------------------------------------
@@ -291,6 +354,20 @@ async def _handle_auth_creation(
             _LOG_TAG, connection_id,
         )
         return
+
+    # Initial sync (the "first sync"): full-pull each new org's Xero data
+    # into the DB so later audits read from our tables. Fire-and-forget; the
+    # first auto-audit below may run before it finishes and simply falls back to
+    # a live fetch until the sync lands — the audit always works either way.
+    from app.modules.integrations.sync.tasks import sync_company_task
+
+    for cid in new_company_ids:
+        try:
+            sync_company_task.delay(str(cid), full=True)
+        except Exception:
+            logger.exception(
+                "%s initial sync dispatch failed for company=%s", _LOG_TAG, cid,
+            )
 
     # Auto-audit each newly-created org. dispatch_audit just inserts a batch
     # row + enqueues the Celery worker (.delay) — fast, non-blocking.

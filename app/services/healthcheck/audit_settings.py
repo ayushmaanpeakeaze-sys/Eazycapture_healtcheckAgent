@@ -6,8 +6,8 @@ unless a client overrides a value. Built from the company's
 ``audit_config['settings']`` dict (any unknown keys are ignored; missing keys
 keep the default).
 
-This is the "configurable settings (Xenon se behtar)" foundation — one object,
-threaded through the orchestrator into the checks.
+This is the configurable-settings foundation — one object, threaded through the
+orchestrator into the checks.
 """
 from __future__ import annotations
 
@@ -82,8 +82,8 @@ class AuditSettings:
     # 0 (default) = the two documents must share the SAME issue date (sir's rule).
     # Configurable: bump to 1/2/N to also pair documents that many days apart.
     duplicate_days_window: int = 0
-    # Xenon-parity duplicate-invoice toggles (defaults preserve our stricter
-    # behaviour; flip them to widen toward Xenon's looser matching):
+    # Duplicate-invoice toggles (defaults preserve our stricter behaviour; flip
+    # them to widen toward looser matching):
     duplicate_require_same_amount: bool = True       # off → values may differ
     # ON (default): drop pairs whose references CONFLICT (both present, differ);
     # exact-ref AND no-ref pairs still flag. OFF → different-ref also surfaces (review).
@@ -104,11 +104,11 @@ class AuditSettings:
     #   "due_date" (default) — days PAST the due date (true overdue). The due
     #                          date already bakes in the 20/30-day terms, so
     #                          even 1 day past it is flagged.
-    #   "invoice_date"       — days since it was raised (Xenon-style ageing).
+    #   "invoice_date"       — days since it was raised (ageing by issue date).
     old_unpaid_age_basis: str = "due_date"
     credit_age_days: int = 60            # separate from overdue (doc fix)
     # Unapproved invoices/bills (DRAFT or SUBMITTED): the invoice must be at
-    # least this many days old (by invoice date) to show up. Xenon default is 0
+    # least this many days old (by invoice date) to show up. The default is 0
     # → every unapproved document is surfaced immediately; raise it to hide
     # very recent ones you expect to approve soon.
     unapproved_grace_days: int = 0
@@ -127,10 +127,10 @@ class AuditSettings:
     outlier_multiple: Decimal = Decimal("4.0")
     outlier_min_amount: Decimal = Decimal("100")
     # --- duplicate contacts ---
-    # Xenon-style: the ONLY duplicate-contacts threshold. Two contact NAMES must
-    # be at least this similar (0..1) to flag a possible duplicate. Everything
-    # else (VAT/email/phone) is enrichment, not part of the match.
-    dup_contact_name_sim: float = 0.70   # 0..1 (Xenon default 70%)
+    # The ONLY duplicate-contacts threshold. Two contact NAMES must be at least
+    # this similar (0..1) to flag a possible duplicate. Everything else
+    # (VAT/email/phone) is enrichment, not part of the match.
+    dup_contact_name_sim: float = 0.70   # 0..1 (default 70%)
     ignore_generic_contact: bool = True  # legacy: kept for config back-compat
     # --- capital / asset ---
     # Low-Cost Fixed Asset: a FIXED-asset line BELOW this is too cheap to capitalise.
@@ -150,7 +150,7 @@ class AuditSettings:
     undocumented_ignore_contacts: tuple[str, ...] = ()
     # --- opening balance differences (filed accounts vs Xero) -------------
     # Minimum |Net Assets filed - Net Assets in Xero| that flags an issue.
-    # Xenon's default is £1 (ignores negligible rounding).
+    # The default is £1 (ignores negligible rounding).
     opening_balance_min_difference: Decimal = Decimal("1")
     # --- misallocated items (vague account + material amount) -------------
     misallocated_materiality: Decimal = Decimal("100")

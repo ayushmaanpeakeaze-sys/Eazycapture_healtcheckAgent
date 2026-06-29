@@ -20,6 +20,7 @@ from app.core.db import Base
 from app.modules.auth import models as _auth_models  # noqa: F401
 from app.modules.healthcheck import models as _hc_models  # noqa: F401
 from app.modules.insights import models as _insights_models  # noqa: F401
+from app.modules.integrations.sync import models as _sync_models  # noqa: F401
 from app.modules.notifications import models as _notif_models  # noqa: F401
 
 config = context.config

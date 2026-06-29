@@ -13,7 +13,7 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
                  "Invoice is at least … days old", "int",
                  "Only show an unapproved (DRAFT or SUBMITTED) invoice/bill once "
                  "it is at least this many days old, measured from the invoice "
-                 "date. Xenon default 0 = surface every unapproved document "
+                 "date. Default 0 = surface every unapproved document "
                  "immediately. Applies to both unapproved invoices and bills.",
                  unit="days", min=0, max=365, step=1),
 )

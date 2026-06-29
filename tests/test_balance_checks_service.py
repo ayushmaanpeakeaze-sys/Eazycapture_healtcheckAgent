@@ -20,6 +20,10 @@ def _fake_db(company):
     db = MagicMock()
     db.get = AsyncMock(return_value=company)
     db.commit = AsyncMock()
+    # bank-balance counts the per-account notes/docs via db.execute(...).all();
+    # return an empty grouped result so those queries are a no-op in unit tests.
+    _empty = MagicMock(); _empty.all.return_value = []
+    db.execute = AsyncMock(return_value=_empty)
     return db
 
 

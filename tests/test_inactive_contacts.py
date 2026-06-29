@@ -1,8 +1,8 @@
-"""Inactive Contacts check (Xenon-style: last-activity DATE + age threshold).
+"""Inactive Contacts check: last-activity DATE + age threshold.
 
 A contact is flagged when its MOST RECENT transaction is older than
 ``inactive_days`` (default 180), or when it has never transacted. Output carries
-``last_activity_date`` + ``age_days`` for the Xenon table columns.
+``last_activity_date`` + ``age_days`` for the table columns.
 """
 from datetime import date
 

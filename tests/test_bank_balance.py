@@ -1,4 +1,4 @@
-"""Bank Balance Check (Xenon parity, check #30).
+"""Bank Balance Check (check #30).
 
 Per bank account, flag where the statement balance (Xero BankSummary closing)
 differs from the GL balance (Xero TrialBalance) by more than a tolerance. Pure

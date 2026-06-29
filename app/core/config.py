@@ -46,6 +46,10 @@ class Settings:
     NANGO_XERO_INTEGRATION_ID: str
     # Cap pagination so a misconfigured connection can't pull forever.
     MAX_NANGO_PAGES: int
+    # Where the audit fetches Xero documents from: "proxy" (live proxy_get, default)
+    # or "action" (deployed custom list-*-full Nango actions — same data, line items
+    # intact). Flip to "action" once the actions are deployed + verified.
+    AUDIT_SOURCE: str
 
     # Deployment environment: development | staging | production.
     # In production the app refuses to boot with insecure settings
@@ -149,6 +153,7 @@ def _load() -> Settings:
         NANGO_USER_ID=os.environ.get("NANGO_USER_ID", "poc-demo-user"),
         NANGO_XERO_INTEGRATION_ID=os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero"),
         MAX_NANGO_PAGES=int(os.environ.get("MAX_NANGO_PAGES", "10")),
+        AUDIT_SOURCE=os.environ.get("AUDIT_SOURCE", "proxy").strip().lower(),
         APP_ENV=os.environ.get("APP_ENV", "development").strip().lower(),
         AUTH_DISABLED=_as_bool(os.environ.get("AUTH_DISABLED", "false")),
         JWT_SECRET=os.environ.get("JWT_SECRET", ""),

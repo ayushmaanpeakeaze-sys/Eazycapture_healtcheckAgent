@@ -183,7 +183,7 @@ class ResolveService:
     ) -> ResolveResponse:
         """Void an invoice/bill (Status → VOIDED). Xero rejects voiding an
         invoice that has a payment or credit note allocated, so we block that
-        up-front with a clear message (matching Xenon) instead of failing at the
+        up-front with a clear message instead of failing at the
         API. Otherwise delegates to ``resolve`` (the real Xero write)."""
         row = await self._repo.find_by_id(row_id, company_id)
         if row is None:

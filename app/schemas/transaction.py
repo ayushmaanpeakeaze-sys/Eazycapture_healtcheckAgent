@@ -172,7 +172,7 @@ class BatchContext(_StrictBase):
     # VAT for a non-VAT business). None = unknown → checks run as before.
     org_is_vat_registered: Optional[bool] = None
     # Per-contact saved default accounts. When present, Unexpected-Account runs
-    # in default-based mode (Xenon parity); when empty it falls back to the
+    # in default-based mode (per the spec); when empty it falls back to the
     # frequency-outlier heuristic.
     contact_defaults: list[ContactDefault] = Field(default_factory=list)
     # Pairs of ContactIDs the Duplicate-Contacts check flagged as likely the

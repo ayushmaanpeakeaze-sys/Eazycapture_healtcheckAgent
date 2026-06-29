@@ -429,7 +429,7 @@ def test_cross_contact_not_paired_without_alias():
     assert hits == []
 
 
-# --- Xenon-parity settings -------------------------------------------------
+# --- Settings per the spec --------------------------------------------------
 
 def _paid_doc(tid, ref, *, paid, amount="100", d=date(2026, 1, 1)):
     return BatchTransaction(
@@ -454,7 +454,7 @@ def test_require_same_amount_off_flags_different_values():
         "duplicate_require_exact_reference": False,   # allow the conflicting refs through
     })
     hits = _find_duplicate_bills(pair, None, loose)
-    assert len(hits) == 2                                          # Xenon-loose flags it
+    assert len(hits) == 2                                          # loose mode flags it
     assert hits[0].match_reasons["same_amount"] is False
     assert hits[0].match_reasons["reference_match"] == "different"
 

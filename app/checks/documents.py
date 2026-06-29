@@ -25,7 +25,7 @@ def _find_undocumented_bills(
     transactions: list[BatchTransaction],
     settings=None,
 ) -> list[FlaggedIssue]:
-    """Xenon Undocumented Bills: a supplier BILL (or, via the 'Show direct
+    """Undocumented Bills: a supplier BILL (or, via the 'Show direct
     payments' toggle, a Money Out) with NO attachment in Xero (HasAttachments
     False). Filters: minimum amount, tax-only, and ignored contacts. Money Out
     is always flagged here; the frontend hides it by default (exclude_bank_items)."""

@@ -227,15 +227,94 @@ class NangoService:
         connection_id: str,
         invoice_id: str,
         fields: dict[str, Any],
+        tenant_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
-        """Update an invoice via the ``update-invoice`` Nango Action."""
+        """Update an invoice via the ``update-invoice`` Nango Action.
+        ``tenant_id`` passed per-call (one connection → many Xero orgs)."""
+        input_data: dict[str, Any] = {"invoiceId": invoice_id, **fields}
+        if tenant_id:
+            input_data["tenantId"] = tenant_id
         result = await self._client.trigger_action(
             connection_id=connection_id,
             provider_config_key=self._provider_config_key,
             action="update-invoice",
-            input_data={"invoiceId": invoice_id, **fields},
+            input_data=input_data,
         )
         return result if isinstance(result, dict) else None
+
+    # --- custom FULL-data list actions (line items intact; pre-built strip them) ---
+    async def _action_list_full(
+        self,
+        connection_id: str,
+        action: str,
+        result_key: str,
+        tenant_id: Optional[str] = None,
+        page: int = 1,
+        where: Optional[str] = None,
+        modified_since: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """One page of a custom ``list-*-full`` action. ``tenant_id`` is passed
+        PER-CALL (one connection can cover many Xero orgs, so the org can't live
+        in connection metadata). Empty list when the action isn't enabled
+        (404 → None) so the caller's page loop just stops."""
+        input_data: dict[str, Any] = {"page": page}
+        if tenant_id:
+            input_data["tenantId"] = tenant_id
+        if where:
+            input_data["where"] = where
+        if modified_since:
+            input_data["modifiedSince"] = modified_since
+        result = await self._client.trigger_action(
+            connection_id=connection_id,
+            provider_config_key=self._provider_config_key,
+            action=action,
+            input_data=input_data,
+        )
+        if isinstance(result, dict) and isinstance(result.get(result_key), list):
+            return result[result_key]
+        return []
+
+    async def action_list_invoices_full(
+        self, connection_id: str, tenant_id: Optional[str] = None, page: int = 1,
+        where: Optional[str] = None, modified_since: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """``list-invoices-full`` — invoices/bills WITH line items, one page."""
+        return await self._action_list_full(
+            connection_id, "list-invoices-full", "invoices", tenant_id, page, where, modified_since)
+
+    async def action_list_bank_transactions_full(
+        self, connection_id: str, tenant_id: Optional[str] = None, page: int = 1,
+        where: Optional[str] = None, modified_since: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """``list-bank-transactions-full`` — Money In/Out WITH lines + IsReconciled."""
+        return await self._action_list_full(
+            connection_id, "list-bank-transactions-full", "bankTransactions", tenant_id, page, where, modified_since)
+
+    async def action_list_contacts_full(
+        self, connection_id: str, tenant_id: Optional[str] = None, page: int = 1,
+        where: Optional[str] = None, modified_since: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """``list-contacts-full`` — contacts WITH defaults (sales/purchase
+        account + tax), email, status. One page."""
+        return await self._action_list_full(
+            connection_id, "list-contacts-full", "contacts", tenant_id, page, where, modified_since)
+
+    async def action_list_accounts_full(
+        self, connection_id: str, tenant_id: Optional[str] = None, page: int = 1,
+        where: Optional[str] = None, modified_since: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """``list-accounts-full`` — full chart of accounts (code, name, Type,
+        TaxType, Class, status). Xero doesn't paginate accounts → single page."""
+        return await self._action_list_full(
+            connection_id, "list-accounts-full", "accounts", tenant_id, page, where, modified_since)
+
+    async def action_list_credit_notes_full(
+        self, connection_id: str, tenant_id: Optional[str] = None, page: int = 1,
+        where: Optional[str] = None, modified_since: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """``list-credit-notes-full`` — credit notes WITH lines + RemainingCredit."""
+        return await self._action_list_full(
+            connection_id, "list-credit-notes-full", "creditNotes", tenant_id, page, where, modified_since)
 
     # ---------------------------------------------------------------
     # Proxy fallbacks (used when the Action is not yet toggled on)

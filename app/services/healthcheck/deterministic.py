@@ -196,7 +196,7 @@ def _check_old_unpaid(
         issue_type="old_unpaid_invoice" if is_sale else "old_unpaid_bill",
         severity="high",
         message=msg[:140],
-        # Age column (computed at audit time with the configured basis, Xenon-style)
+        # Age column (computed at audit time with the configured basis)
         # + outstanding so the frontend renders without any date math.
         match_reasons={
             "age_days": age,
@@ -240,7 +240,7 @@ def _check_old_unsettled_credit(
         return None
     outstanding = _outstanding_amount(tx)
     age = (today - tx.date).days
-    # Xenon: "credit note is at least X days old" (by credit-note date) AND still
+    # Rule: "credit note is at least X days old" (by credit-note date) AND still
     # has unallocated/unrefunded credit (RemainingCredit > 0).
     if outstanding <= 0 or age < settings.credit_age_days:
         return None
@@ -266,7 +266,7 @@ def _check_unapproved(
     is_purchase = doc_type in _PURCHASE_DOC_TYPES
     if not (is_sale or is_purchase):
         return None
-    # Xenon: "Date of invoice is at least x days old" (by invoice date), default
+    # Rule: "Date of invoice is at least x days old" (by invoice date), default
     # 0 → flag every unapproved doc. Flag when age >= the configured minimum.
     age = (today - (tx.posted_date or tx.date)).days
     if age < settings.unapproved_grace_days:

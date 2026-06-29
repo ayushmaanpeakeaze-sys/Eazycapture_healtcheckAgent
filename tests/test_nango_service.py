@@ -207,6 +207,7 @@ def test_audit_fails_visibly_on_xero_auth_error(monkeypatch):
     from app.modules.healthcheck import tasks
     from app.modules.healthcheck.seed_data import DEMO_CO_ID
     from app.modules.integrations.nango.client import NangoAuthError
+    from app.modules.integrations.service import IntegrationService
 
     monkeypatch.setattr(NangoService, "is_available", lambda self: True)
 
@@ -214,6 +215,19 @@ def test_audit_fails_visibly_on_xero_auth_error(monkeypatch):
         # Mirrors NangoClient._send raising on a 401/403 GET.
         raise NangoAuthError("Xero rejected the request (HTTP 403).")
     monkeypatch.setattr(NangoService, "fetch_xero_invoices_page", _raise_auth)
+
+    # Self-heal probes for a live connection; stub it to "none found" so the test
+    # is hermetic. Without this it makes a REAL Nango call — flaky against
+    # whatever connection happens to be live in the dev account.
+    async def _no_live(*args, **kwargs):
+        return None
+    monkeypatch.setattr(IntegrationService, "find_live_xero_connection", _no_live)
+
+    # This test is specifically about the LIVE-fetch failure path. Under
+    # AUDIT_SOURCE=db the audit would read the DB instead (and never hit the
+    # failing fetch), so force the live path — exactly what happens for a
+    # connected-but-not-yet-synced org.
+    monkeypatch.setattr(tasks.db_read, "has_synced_documents", lambda *a, **k: False)
 
     with SyncSessionLocal() as db:
         company = db.get(Company, DEMO_CO_ID)

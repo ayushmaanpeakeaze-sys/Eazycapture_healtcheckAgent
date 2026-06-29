@@ -3,7 +3,7 @@
 Covers the two pure cores of the check (no I/O):
   * Companies House iXBRL → filed Net Assets (sign / scale / multi-period)
   * Xero BalanceSheet → Net Assets extraction
-  * Filed-vs-Xero diff engine (reproduces Xenon's published numbers)
+  * Filed-vs-Xero diff engine (reproduces the published numbers)
 """
 from decimal import Decimal
 
@@ -126,9 +126,9 @@ def test_balance_sheet_missing_returns_none():
     assert extract_net_assets_from_balance_sheet(None) is None
 
 
-# ---------------- Diff engine (Xenon reproduction) ----------------
+# ---------------- Diff engine (reproduction) ----------------
 
-def test_diff_engine_reproduces_xenon_totals():
+def test_diff_engine_reproduces_totals():
     filed = [
         FiledNetAssets("2023-09-30", Decimal("324")),
         FiledNetAssets("2022-09-30", Decimal("528")),

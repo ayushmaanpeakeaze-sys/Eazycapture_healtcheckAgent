@@ -89,9 +89,9 @@ def test_duplicate_window_override_widens_detection():
     assert wide and wide[0].confidence == 1.0
 
 
-def test_multi_account_pure_xenon_two_distinct():
+def test_multi_account_pure_two_distinct():
     coa = {"400": "Rent", "401": "Travel"}
-    # Xenon: a supplier with 2+ DISTINCT accounts is flagged — no 3-txn or
+    # Per the spec: a supplier with 2+ DISTINCT accounts is flagged — no 3-txn or
     # dominance minimum. Just two bills on two accounts is enough.
     txns = [_bill("1", 5),
             _bill("2", 6, ref="R2").model_copy(update={"current_account_code": "401"})]
@@ -126,7 +126,7 @@ def _contact(cid, name, email=None, tax=None):
 
 
 def test_shared_email_alone_does_not_match_different_names():
-    # Matching is NAME-only (Xenon-style): two differently-named contacts that
+    # Matching is NAME-only: two differently-named contacts that
     # happen to share an email are NOT a duplicate — email is enrichment, not a
     # match signal. ('Alpha Roofing' vs 'Beta Plumbing' → ~0% name similarity.)
     contacts = [
@@ -290,7 +290,7 @@ def test_settings_schema_exposes_duplicate_invoice_tunables():
 
 def test_settings_schema_exposes_duplicate_contact_similarity():
     """The Duplicate Contacts check exposes a single name-similarity threshold
-    (Xenon's 'minimum similarity %'), rendered as a percent slider."""
+    (the 'minimum similarity %'), rendered as a percent slider."""
     from app.services.healthcheck.audit_settings import settings_schema
 
     dc = next(e for e in settings_schema() if e["check"] == "duplicate_contact")

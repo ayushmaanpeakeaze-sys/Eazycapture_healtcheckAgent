@@ -34,7 +34,7 @@ _FLAG_SNOOZED_UNTIL_TS = "snoozed_until_ts"
 _FLAG_AUTO_CLEARED = "auto_cleared"
 
 # The flags a USER sets to hide a still-valid row. ``restore`` clears exactly
-# these (Xenon's "Mark as Not OK" / "Add back to issue list") — it never touches
+# these (the "Mark as Not OK" / "Add back to issue list" action) — it never touches
 # ``resolved`` (genuinely fixed) or ``auto_cleared`` (latest audit dropped it).
 _USER_HIDE_FLAGS = (
     _FLAG_MARKED_OK, "mark_ok_reason", "marked_ok_by_user_id",
@@ -155,7 +155,7 @@ class HealthCheckResultRepository:
         exclude_bank_items: bool = False,
     ) -> tuple[list[HealthCheckResult], int, Decimal]:
         """Page of latest blocked post-ledger rows + total row count + total
-        value (Xenon's "Total Potential Errors" £ sum across ALL matching rows).
+        value (the "Total Potential Errors" £ sum across ALL matching rows).
 
         Excludes anything marked ``resolved`` / ``dismissed`` inside the
         ``result`` JSONB. Filter uses Postgres ``@>`` (``.contains``) so
@@ -410,8 +410,8 @@ class HealthCheckResultRepository:
         company_id: UUID,
     ) -> Optional[HealthCheckResult]:
         """Clear the user 'hide' flags (marked_ok / dismissed / snoozed) so the
-        row returns to the actionable feed — Xenon's "Mark as Not OK" / "Add back
-        to issue list". Does NOT touch ``resolved`` (genuinely fixed) or
+        row returns to the actionable feed — the "Mark as Not OK" / "Add back
+        to issue list" action. Does NOT touch ``resolved`` (genuinely fixed) or
         ``auto_cleared`` (latest audit no longer flags it). Locks FOR UPDATE."""
         row = await self._select_for_update(row_id, company_id)
         if row is None:

@@ -17,9 +17,10 @@ from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile, status
+from fastapi.responses import JSONResponse, Response
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, get_current_user
@@ -121,6 +122,241 @@ async def sync_xero_history(
         )
     finally:
         await service.close()
+
+
+@router.post(
+    "/refresh-data/{company_id}/",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Manual Xero data sync (the 'Refresh Data' button). Returns immediately.",
+)
+async def refresh_data(
+    company_id: UUID = Depends(get_current_company_id),
+    full: bool = Query(
+        False,
+        description="True forces a full re-pull (ignore watermarks); default is "
+        "incremental — only records changed since the last sync.",
+    ),
+) -> dict[str, object]:
+    """The "Refresh Data" action — enqueue an incremental sync of this org's Xero
+    data (invoices, bills, bank txns, credit notes, contacts, accounts, tax
+    rates) into our DB. Fire-and-forget; poll ``/sync-status`` for progress."""
+    from app.modules.integrations.sync.tasks import sync_company_task
+
+    sync_company_task.delay(str(company_id), full=full)
+    return {
+        "status": "queued",
+        "company_id": str(company_id),
+        "mode": "full" if full else "incremental",
+    }
+
+
+@router.post(
+    "/disconnect/{company_id}/",
+    status_code=status.HTTP_200_OK,
+    summary="Disconnect (deactivate) one org from EazyCapture. Data kept; reconnect re-activates.",
+)
+async def disconnect_company(
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Remove an org from EazyCapture: mark it inactive so it drops off the
+    dashboard and stops syncing/auditing.
+
+    Deliberately the LIGHT disconnect: the Xero grant + Nango connection are left
+    intact and the synced data is KEPT. Reconnecting via "Connect to Xero" (the
+    webhook flips ``is_active`` back to True) — or the nightly reconcile — brings
+    the org back with its full history, no re-import needed.
+    """
+    from app.modules.healthcheck.models import Company
+
+    company = await db.get(Company, company_id)
+    if company is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "company not found"},
+        )
+    company.is_active = False
+    await db.commit()
+    return {
+        "status": "disconnected",
+        "company_id": str(company_id),
+        "is_active": False,
+    }
+
+
+@router.get(
+    "/disconnected-companies/",
+    summary="List the user's disconnected (deactivated) Xero orgs — the "
+    "'Disconnected' section, each reconnectable in one click.",
+)
+async def disconnected_companies(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Orgs the user disconnected — hidden from the main dashboard but kept so
+    they can be reconnected with their full history. Only real Xero orgs (a
+    connection exists), never seed/demo rows."""
+    from app.modules.healthcheck.models import Company
+
+    allowed = await allowed_company_ids_for(db, user)
+    stmt = (
+        select(Company)
+        .where(
+            Company.is_active.is_(False),
+            Company.nango_connection_id.isnot(None),
+        )
+        .order_by(Company.name.asc())
+    )
+    if allowed is not None:
+        stmt = stmt.where(Company.id.in_(allowed))
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "results": [
+            {
+                "company_id": str(c.id),
+                "name": c.name,
+                "xero_tenant_id": c.xero_tenant_id,
+            }
+            for c in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.post(
+    "/reconnect/{company_id}/",
+    status_code=status.HTTP_200_OK,
+    summary="Reconnect (reactivate) a disconnected org — one click, no re-OAuth.",
+)
+async def reconnect_company(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Bring a disconnected org back. The Nango grant was never revoked, so this
+    just flips ``is_active`` on (data + history are still there) and kicks off an
+    incremental sync to freshen it — no Xero re-authorisation needed.
+
+    Uses a manual access check (not ``get_current_company_id``, which 404s on an
+    inactive company by design).
+    """
+    from app.modules.healthcheck.models import Company
+
+    company = await db.get(Company, company_id)
+    if company is None or not company.nango_connection_id:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "company not found"},
+        )
+    allowed = await allowed_company_ids_for(db, user)
+    if allowed is not None and company_id not in allowed:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "You are not assigned to this company."},
+        )
+    company.is_active = True
+    await db.commit()
+
+    # Freshen it in the background (best-effort — the org already returns with
+    # its kept history even if this sync is delayed/fails).
+    try:
+        from app.modules.integrations.sync.tasks import sync_company_task
+
+        sync_company_task.delay(str(company_id))
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "status": "reconnected",
+        "company_id": str(company_id),
+        "is_active": True,
+    }
+
+
+@router.delete(
+    "/company/{company_id}/",
+    status_code=status.HTTP_200_OK,
+    summary="PERMANENTLY remove an org + ALL its data (hard delete). Irreversible.",
+)
+async def remove_company(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Hard-delete an org and EVERYTHING under it — synced Xero docs, sync
+    state, invoices, audit batches, health-check results, access links. Unlike
+    *disconnect* (which only hides + keeps data), this is irreversible: the row
+    is gone and a future reconnect starts fresh.
+
+    Use for cleaning up duplicate/test orgs. The shared Nango connection is NOT
+    revoked (other orgs on the same grant keep working). Manual access check
+    (admin or assigned) — works whether the org is active or already disconnected.
+    """
+    from app.modules.healthcheck.models import Company
+
+    company = await db.get(Company, company_id)
+    if company is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "company not found"},
+        )
+    allowed = await allowed_company_ids_for(db, user)
+    if allowed is not None and company_id not in allowed:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "You are not assigned to this company."},
+        )
+    name = company.name
+    # ON DELETE CASCADE (FKs) clears xero_document / xero_sync_state / invoice /
+    # health_check_result / audit_batch / access links with the company row.
+    await db.delete(company)
+    await db.commit()
+    return {
+        "status": "removed",
+        "company_id": str(company_id),
+        "name": name,
+    }
+
+
+@router.get(
+    "/sync-status/{company_id}/",
+    summary="Per-entity Xero sync state (last sync time, watermark, counts).",
+)
+async def sync_status(
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Drives the Refresh UI: when each entity last synced, its watermark, the
+    last run's status + record count. ``synced=false`` → an initial sync hasn't
+    run yet (the audit falls back to a live fetch until it does)."""
+    from app.modules.integrations.sync.models import SYNC_ENTITIES, XeroSyncState
+
+    rows = (
+        await db.execute(
+            select(XeroSyncState).where(XeroSyncState.company_id == company_id)
+        )
+    ).scalars().all()
+    by_entity = {r.entity: r for r in rows}
+    entities = {}
+    for name in SYNC_ENTITIES:
+        r = by_entity.get(name)
+        entities[name] = {
+            "last_sync_at": r.last_sync_at.isoformat() if r and r.last_sync_at else None,
+            "watermark_utc": (
+                r.watermark_utc.isoformat() if r and r.watermark_utc else None
+            ),
+            "status": r.last_status if r else None,
+            "records": r.last_record_count if r else 0,
+            "error": r.last_error if r else None,
+        }
+    any_synced = any(
+        v["last_sync_at"] for v in entities.values()
+    )
+    return {
+        "company_id": str(company_id),
+        "synced": any_synced,
+        "entities": entities,
+    }
 
 
 @router.get(
@@ -415,7 +651,7 @@ async def restore_trapped(
     company_id: UUID = Depends(get_current_company_id),
     db: AsyncSession = Depends(get_db),
 ) -> RestoreResponse:
-    """Xenon's "Mark as Not OK" / "Add back to issue list" — clears the user
+    """The "Mark as Not OK" / "Add back to issue list" action — clears the user
     hide-flags (marked_ok / dismissed / snoozed) so the row returns to the
     actionable feed. Does not touch a genuinely *resolved* row."""
     service = ResolveService(db)
@@ -1212,6 +1448,165 @@ async def bank_balance_mark_ok(
     await BankBalanceService(db).mark_ok(
         company_id, payload.account_code, payload.period_end.isoformat(), ok=payload.ok)
     return {"account_code": payload.account_code, "marked_ok": payload.ok}
+
+
+# ---------------------------------------------------------------------
+# Bank Balance Check — review annotations (notes + supporting documents).
+# Internal EazyCapture data (never Xero). Keyed per (account_code, period_end).
+# ---------------------------------------------------------------------
+
+@router.post(
+    "/bank-balance-check/{account_code}/notes/",
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a note to a bank account at a period end (team members taggable).",
+)
+async def add_bank_note(
+    account_code: str,
+    period_end: str = Body(..., description="Closing date YYYY-MM-DD"),
+    body: str = Body(..., description="Note text"),
+    tagged_user_ids: list[str] = Body(default_factory=list),
+    company_id: UUID = Depends(get_current_company_id),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        BankAnnotationsService,
+    )
+
+    return await BankAnnotationsService(db).add_note(
+        company_id, account_code, period_end, body,
+        author_user_id=user.user_id, tagged_user_ids=tagged_user_ids,
+    )
+
+
+@router.get(
+    "/bank-balance-check/{account_code}/notes/",
+    summary="List notes for a bank account at a period end.",
+)
+async def list_bank_notes(
+    account_code: str,
+    period_end: str = Query(..., description="Closing date YYYY-MM-DD"),
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        BankAnnotationsService,
+    )
+
+    notes = await BankAnnotationsService(db).list_notes(
+        company_id, account_code, period_end)
+    return {"results": notes, "total": len(notes)}
+
+
+@router.delete(
+    "/bank-balance-check/notes/{note_id}/",
+    summary="Delete a bank note.",
+)
+async def delete_bank_note(
+    note_id: UUID,
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        BankAnnotationsService,
+    )
+
+    ok = await BankAnnotationsService(db).delete_note(company_id, note_id)
+    return {"deleted": ok}
+
+
+@router.post(
+    "/bank-balance-check/{account_code}/documents/",
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload supporting documentation (bank statement etc.) for a period end.",
+)
+async def upload_bank_document(
+    account_code: str,
+    period_end: str = Form(..., description="Closing date YYYY-MM-DD"),
+    file: UploadFile = File(...),
+    company_id: UUID = Depends(get_current_company_id),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        MAX_UPLOAD_BYTES,
+        BankAnnotationsService,
+    )
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        return JSONResponse(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            content={"detail": f"File exceeds {MAX_UPLOAD_BYTES // (1024*1024)} MB limit."},
+        )
+    return await BankAnnotationsService(db).upload_document(
+        company_id, account_code, period_end,
+        filename=file.filename or "upload",
+        content_type=file.content_type or "application/octet-stream",
+        content=content, uploaded_by=user.user_id,
+    )
+
+
+@router.get(
+    "/bank-balance-check/{account_code}/documents/",
+    summary="List uploaded documents (metadata only) for a period end.",
+)
+async def list_bank_documents(
+    account_code: str,
+    period_end: str = Query(..., description="Closing date YYYY-MM-DD"),
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        BankAnnotationsService,
+    )
+
+    docs = await BankAnnotationsService(db).list_documents(
+        company_id, account_code, period_end)
+    return {"results": docs, "total": len(docs)}
+
+
+@router.get(
+    "/bank-balance-check/documents/{document_id}/download/",
+    summary="Download an uploaded supporting document.",
+)
+async def download_bank_document(
+    document_id: UUID,
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        BankAnnotationsService,
+    )
+
+    doc = await BankAnnotationsService(db).get_document(company_id, document_id)
+    if doc is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "document not found"},
+        )
+    return Response(
+        content=doc.content,
+        media_type=doc.content_type,
+        headers={"Content-Disposition": f'attachment; filename="{doc.filename}"'},
+    )
+
+
+@router.delete(
+    "/bank-balance-check/documents/{document_id}/",
+    summary="Delete an uploaded supporting document.",
+)
+async def delete_bank_document(
+    document_id: UUID,
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    from app.modules.healthcheck.services.bank_annotations_service import (
+        BankAnnotationsService,
+    )
+
+    ok = await BankAnnotationsService(db).delete_document(company_id, document_id)
+    return {"deleted": ok}
 
 
 @router.get(

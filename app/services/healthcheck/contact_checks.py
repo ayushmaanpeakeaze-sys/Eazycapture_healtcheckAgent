@@ -7,7 +7,7 @@ application layer (``app/modules/healthcheck/tasks.py``) calls
 
 Three rules run against the full contacts list fetched from Xero:
 
-  duplicate_contact   — Xenon-style name-similarity match (≥70%), VAT-aware confidence
+  duplicate_contact   — name-similarity match (≥70%), VAT-aware confidence
   contact_defaults    — supplier/customer with no default account or tax code
   inactive_contact    — contact with no transactions in the last 180 days
 
@@ -88,9 +88,9 @@ def _name_similarity(norm_a: str, norm_b: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Duplicate-contact scoring (Xenon-style: name similarity, VAT-aware confidence)
+# Duplicate-contact scoring (name similarity, VAT-aware confidence)
 # ---------------------------------------------------------------------------
-# The MATCH is driven purely by the contact NAME, exactly like Xenon Connect:
+# The MATCH is driven purely by the contact NAME:
 #   1. normalise the name (strip Ltd/Limited/Pvt/Inc/LLC… + punctuation, lower)
 #   2. similarity % = fuzzy ratio of the two normalised names
 #   3. a pair is a candidate when similarity >= dup_contact_name_sim (default 70%)
@@ -156,7 +156,7 @@ def _has_address(c: dict[str, Any]) -> bool:
 
 
 def _has_person(c: dict[str, Any]) -> bool:
-    """True if a person's name is attached to the contact (Xenon 'Person' column)."""
+    """True if a person's name is attached to the contact (the 'Person' column)."""
     return bool(
         (c.get("FirstName") or "").strip()
         or (c.get("LastName") or "").strip()
@@ -176,7 +176,7 @@ def _name_trigrams(norm_compact: str) -> set[str]:
 
 
 def _contact_helper(c: dict[str, Any]) -> dict[str, Any]:
-    """Enrichment columns (Xenon's Invoices / Bills / Person / Email / Address /
+    """Enrichment columns (Invoices / Bills / Person / Email / Address /
     Telephone) so a human can pick which record to keep — we NEVER auto-merge."""
     phones = sorted(_contact_phones(c))
     return {
@@ -237,8 +237,8 @@ def _duplicate_contacts(
     contacts: list[dict[str, Any]],
     settings: AuditSettings = DEFAULT_SETTINGS,
 ) -> list[dict[str, Any]]:
-    """Check 1 — duplicate contacts, Xenon-style (name similarity + VAT-aware
-    confidence). Runs FIRST in the audit.
+    """Check 1 — duplicate contacts (name similarity + VAT-aware confidence).
+    Runs FIRST in the audit.
 
     Stage 1 (blocking): bucket contacts by the trigrams of their normalised name
         so only name-similar contacts are ever compared (near-linear; still
@@ -483,7 +483,7 @@ def _inactive_contacts(
     ``settings.inactive_days``, OR that has never transacted.
 
     ``last_activity`` maps ContactID → most recent transaction date. Output
-    carries ``last_activity_date`` + ``age_days`` so the UI can show Xenon's
+    carries ``last_activity_date`` + ``age_days`` so the UI can show the
     "Most Recent Transaction Date" and "Age (Days)" columns.
     """
     threshold = settings.inactive_days
@@ -516,7 +516,7 @@ def _inactive_contacts(
             "severity": "medium",
             "message": message[:200],
             "partner_id": None,
-            # Xenon columns: Most Recent Transaction Date + Age (Days)
+            # Columns: Most Recent Transaction Date + Age (Days)
             "last_activity_date": last.isoformat() if last else None,
             "age_days": age_days,
         })

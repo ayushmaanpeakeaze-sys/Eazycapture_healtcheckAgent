@@ -1,11 +1,11 @@
-"""Unreconciled Bank Items — the buildable (ledger-side) half of Xenon's check.
+"""Unreconciled Bank Items — the buildable (ledger-side) half of the check.
 
 Per bank account, count Xero ``BankTransactions`` that are NOT reconciled
 (``IsReconciled == false``), split by direction:
   * **Unreconciled (Received)** — RECEIVE money not matched to a statement line
   * **Unreconciled (Spent)**    — SPEND money not matched to a statement line
 
-Xenon's third figure — **Unexplained** (imported bank-feed statement lines with
+A third figure — **Unexplained** (imported bank-feed statement lines with
 no Xero transaction at all) — is NOT obtainable from the standard Accounting
 API (it needs the gated Finance API / a browser extension), so it is always
 returned as ``None``. Callers should render it as "—  (requires Finance API)"
@@ -23,8 +23,8 @@ def compute_unreconciled_accounts(
     exclude_codes: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
     """One row per bank account that has unreconciled transactions, largest
-    total first. Accounts with zero unreconciled items are omitted (Xenon hides
-    them). ``exclude_codes`` drops accounts the user has ignored.
+    total first. Accounts with zero unreconciled items are omitted (hidden from
+    the user). ``exclude_codes`` drops accounts the user has ignored.
     """
     excluded = {str(c).strip().upper() for c in (exclude_codes or set())}
     by_account: dict[str, dict[str, Any]] = {}

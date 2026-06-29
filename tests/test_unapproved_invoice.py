@@ -1,8 +1,8 @@
-"""Unapproved Invoices / Bills (Xenon parity): a customer invoice or supplier
+"""Unapproved Invoices / Bills: a customer invoice or supplier
 bill left in DRAFT or SUBMITTED status — it is not reflected in the accounts.
 
 Spec: Status ∈ {DRAFT, SUBMITTED}. Setting "Date of invoice is at least x days
-old" (by invoice date), Xenon default 0 → flag every unapproved document.
+old" (by invoice date), default 0 → flag every unapproved document.
 ACCREC → unapproved_invoice, ACCPAY → unapproved_bill.
 """
 from datetime import date, timedelta
@@ -50,7 +50,7 @@ def test_paid_not_unapproved():
 
 
 def test_default_zero_flags_same_day_draft():
-    # Xenon default 0 → even a DRAFT raised today shows up immediately.
+    # Default 0 → even a DRAFT raised today shows up immediately.
     assert _check_unapproved(_tx("DRAFT", age_days=0), _TODAY, DEFAULT_SETTINGS) is not None
 
 

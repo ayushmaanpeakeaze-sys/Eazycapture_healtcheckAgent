@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from app.modules.integrations.companies_house.service import FiledNetAssets
 
-# Default materiality — Xenon flags a difference of £1 or more.
+# Default materiality — flag a difference of £1 or more.
 DEFAULT_MIN_DIFFERENCE = Decimal("1")
 
 # Row labels that carry the net-assets figure on a Xero BalanceSheet.
@@ -113,7 +113,7 @@ def compute_opening_balance_diffs(
                 filed_source=f.source,
             )
         )
-    # Newest period first (matches Xenon's "Period Ended ▼" default).
+    # Newest period first (matches the "Period Ended ▼" default).
     out.sort(key=lambda d: d.period_end, reverse=True)
     return out
 
@@ -123,7 +123,7 @@ def compute_opening_balance_diffs(
 # (accounting date <= period end) but POSTED most recently — the classic cause:
 # entries booked into a finalised/filed period after the fact.
 
-# Xero document type → the label Xenon shows.
+# Xero document type → the label shown to the user.
 _TYPE_LABELS: dict[str, str] = {
     "ACCREC": "Invoice",
     "ACCPAY": "Bill",

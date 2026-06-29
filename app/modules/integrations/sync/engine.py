@@ -1,0 +1,385 @@
+"""SyncEngine — full + incremental Xero sync into the DB.
+
+One generic loop drives every entity (config in ``ENTITY_SPECS``):
+
+  full sync       (watermark NULL) → no If-Modified-Since → pull everything
+  incremental     (watermark set)  → If-Modified-Since = watermark − overlap →
+                                     only changed records
+
+Each page is upserted then committed immediately (page → DB → forget), so a
+12 000-row entity never sits in memory and the action's 2 MB response cap is a
+non-issue. The watermark (max ``UpdatedDateUTC`` seen) is advanced once the
+entity finishes; a mid-run crash just re-pulls from the old watermark next time
+(upsert is idempotent).
+
+Reads run through the deployed custom ACTIONS — they honour If-Modified-Since
+(the Nango proxy strips it). Small / watermark-less entities (tax rates,
+payments, organisation) full-refresh via the proxy and prune deletions.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable, Optional
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import AsyncSessionLocal
+from app.modules.integrations.nango.service import NangoService
+from app.modules.integrations.sync.models import (
+    SYNC_ENTITIES,
+    XeroDocument,
+    XeroSyncState,
+)
+
+logger = logging.getLogger("uvicorn.error")
+
+# Safety backstop so a misbehaving connection can't page forever (1000 pages ×
+# 100 = 100k records — far beyond any real org; the loop stops on the first
+# empty page well before this).
+MAX_SYNC_PAGES = 1000
+# Re-ask for a small window before the watermark so a record updated in the
+# same second as the last sync isn't missed (Xero truncates If-Modified-Since
+# to seconds). Upsert is idempotent, so re-seeing a row is harmless.
+WATERMARK_OVERLAP = timedelta(seconds=60)
+# Upsert batch size (rows per INSERT … ON CONFLICT).
+_UPSERT_CHUNK = 500
+
+_MS_DATE_RE = re.compile(r"/Date\((-?\d+)(?:[+-]\d{4})?\)/")
+
+
+def parse_xero_datetime(value: Any) -> Optional[datetime]:
+    """Parse Xero's ``UpdatedDateUTC`` → tz-aware UTC datetime.
+
+    Xero's Accounting API returns MS-AJAX ``/Date(1229650679057+0000)/``; some
+    paths return ISO-8601. Handles both, returns None on anything unparseable.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    s = str(value)
+    m = _MS_DATE_RE.search(s)
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)) / 1000.0, tz=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def format_if_modified_since(dt: datetime) -> str:
+    """Watermark datetime → the string Xero's If-Modified-Since expects
+    (UTC, ``YYYY-MM-DDTHH:MM:SS``). Verified live: future date → 0 rows."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+# A page fetcher: (nango, connection_id, tenant_id, page, since_str) -> rows.
+PageFetcher = Callable[
+    [NangoService, str, str, int, Optional[str]], Awaitable[list[dict[str, Any]]]
+]
+
+
+@dataclass(frozen=True)
+class EntitySpec:
+    entity: str
+    mode: str  # "incremental" | "full"
+    id_field: str  # Xero's native id (or natural key) on each raw record
+    fetch_page: PageFetcher
+    paginates: bool = True  # False → single call, no page loop
+
+
+@dataclass
+class SyncResult:
+    entity: str
+    status: str = "ok"
+    records: int = 0
+    mode: str = ""           # "full" | "incremental"
+    since: Optional[str] = None
+    watermark: Optional[datetime] = None
+    error: Optional[str] = None
+
+
+# --- page fetchers -------------------------------------------------------
+
+def _inc(method_name: str) -> PageFetcher:
+    """Incremental fetcher → the deployed ``list-*-full`` action (honours
+    If-Modified-Since via ``modifiedSince``), tenant passed per-call."""
+    async def _f(nango, conn, tenant, page, since):
+        method = getattr(nango, method_name)
+        return await method(conn, tenant_id=tenant, page=page, modified_since=since)
+    return _f
+
+
+async def _fetch_tax_rates(nango, conn, tenant, page, since):
+    return await nango.fetch_xero_tax_rates(conn, tenant) if page == 1 else []
+
+
+async def _fetch_payments(nango, conn, tenant, page, since):
+    return await nango.fetch_xero_payments_page(conn, tenant, page)
+
+
+async def _fetch_org(nango, conn, tenant, page, since):
+    if page != 1:
+        return []
+    org = await nango.fetch_xero_organisation(conn, tenant)
+    return [org] if isinstance(org, dict) and org else []
+
+
+# The eight mirrored entities. First five are incremental (actions honour the
+# watermark); last three are small / watermark-less → full-refresh via proxy.
+ENTITY_SPECS: dict[str, EntitySpec] = {
+    "invoice": EntitySpec(
+        "invoice", "incremental", "InvoiceID", _inc("action_list_invoices_full")),
+    "bank_transaction": EntitySpec(
+        "bank_transaction", "incremental", "BankTransactionID",
+        _inc("action_list_bank_transactions_full")),
+    "credit_note": EntitySpec(
+        "credit_note", "incremental", "CreditNoteID",
+        _inc("action_list_credit_notes_full")),
+    "contact": EntitySpec(
+        "contact", "incremental", "ContactID", _inc("action_list_contacts_full")),
+    "account": EntitySpec(
+        "account", "incremental", "AccountID",
+        _inc("action_list_accounts_full"), paginates=False),
+    "tax_rate": EntitySpec(
+        "tax_rate", "full", "TaxType", _fetch_tax_rates, paginates=False),
+    "payment": EntitySpec(
+        "payment", "full", "PaymentID", _fetch_payments),
+    "organisation": EntitySpec(
+        "organisation", "full", "OrganisationID", _fetch_org, paginates=False),
+}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _chunks(seq: list[Any], size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+class SyncEngine:
+    """Owns the sync loop. One instance per process is fine (stateless besides
+    the Nango client)."""
+
+    def __init__(self, nango: Optional[NangoService] = None) -> None:
+        self._nango = nango or NangoService()
+
+    async def _get_or_create_state(
+        self, db: AsyncSession, company_id: uuid.UUID, entity: str
+    ) -> XeroSyncState:
+        state = (
+            await db.execute(
+                select(XeroSyncState).where(
+                    XeroSyncState.company_id == company_id,
+                    XeroSyncState.entity == entity,
+                )
+            )
+        ).scalar_one_or_none()
+        if state is None:
+            state = XeroSyncState(
+                id=uuid.uuid4(), company_id=company_id, entity=entity,
+            )
+            db.add(state)
+            await db.flush()
+        return state
+
+    async def _upsert_page(
+        self, db: AsyncSession, rows: list[dict[str, Any]]
+    ) -> None:
+        for chunk in _chunks(rows, _UPSERT_CHUNK):
+            stmt = pg_insert(XeroDocument).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                # Target the unique INDEX by its columns (the constraint is a
+                # unique index in the DB, so ON CONFLICT (cols) is the form that
+                # matches — ON CONFLICT ON CONSTRAINT needs a real constraint).
+                index_elements=["company_id", "entity", "xero_id"],
+                set_={
+                    "raw_json": stmt.excluded.raw_json,
+                    "updated_date_utc": stmt.excluded.updated_date_utc,
+                    "synced_at": func.now(),
+                },
+            )
+            await db.execute(stmt)
+
+    async def sync_entity(
+        self,
+        db: AsyncSession,
+        company,
+        entity: str,
+        *,
+        force_full: bool = False,
+    ) -> SyncResult:
+        """Full or incremental sync of ONE entity. Commits per page (so progress
+        survives a crash) and advances the watermark at the end. Never raises —
+        failures land in ``SyncResult.error`` and the entity's state row."""
+        spec = ENTITY_SPECS[entity]
+        conn = company.nango_connection_id
+        tenant = company.xero_tenant_id
+        if not conn or not tenant:
+            return SyncResult(entity, status="error", error="company not connected")
+
+        state = await self._get_or_create_state(db, company.id, entity)
+        state.last_status = "in_progress"
+        await db.commit()
+
+        is_incremental = (
+            spec.mode == "incremental"
+            and state.watermark_utc is not None
+            and not force_full
+        )
+        since_str: Optional[str] = None
+        if is_incremental:
+            since_str = format_if_modified_since(
+                state.watermark_utc - WATERMARK_OVERLAP
+            )
+        max_updated: Optional[datetime] = state.watermark_utc if is_incremental else None
+        seen_ids: set[str] = set()
+        total = 0
+        started = _utcnow()
+
+        try:
+            page = 1
+            while page <= MAX_SYNC_PAGES:
+                rows = await spec.fetch_page(self._nango, conn, tenant, page, since_str)
+                if not rows:
+                    break
+                batch: list[dict[str, Any]] = []
+                for raw in rows:
+                    if not isinstance(raw, dict):
+                        continue
+                    xid = str(raw.get(spec.id_field) or "").strip()
+                    if not xid:
+                        continue
+                    upd = parse_xero_datetime(raw.get("UpdatedDateUTC"))
+                    batch.append({
+                        "id": uuid.uuid4(),
+                        "company_id": company.id,
+                        "entity": entity,
+                        "xero_id": xid[:64],
+                        "raw_json": raw,
+                        "updated_date_utc": upd,
+                    })
+                    seen_ids.add(xid[:64])
+                    if upd and (max_updated is None or upd > max_updated):
+                        max_updated = upd
+                if batch:
+                    await self._upsert_page(db, batch)
+                    await db.commit()
+                    total += len(batch)
+                if not spec.paginates:
+                    break
+                page += 1
+
+            # Full-refresh entities own the WHOLE set each run → prune anything
+            # Xero no longer returns (handles deletions). Incremental entities
+            # must NOT prune (a page of "only changed" rows isn't the full set).
+            if spec.mode == "full":
+                prune = delete(XeroDocument).where(
+                    XeroDocument.company_id == company.id,
+                    XeroDocument.entity == entity,
+                )
+                if seen_ids:
+                    prune = prune.where(XeroDocument.xero_id.notin_(seen_ids))
+                await db.execute(prune)
+                await db.commit()
+
+            if spec.mode == "incremental" and max_updated is not None:
+                state.watermark_utc = max_updated
+            state.last_sync_at = started
+            if not is_incremental:
+                state.last_full_sync_at = started
+            state.last_status = "ok"
+            state.last_error = None
+            state.last_record_count = total
+            await db.commit()
+            logger.info(
+                "[Sync] company=%s entity=%s mode=%s records=%d since=%s watermark=%s",
+                company.id, entity, "incremental" if is_incremental else "full",
+                total, since_str, max_updated,
+            )
+            return SyncResult(
+                entity, status="ok", records=total,
+                mode="incremental" if is_incremental else "full",
+                since=since_str, watermark=max_updated,
+            )
+        except Exception as exc:  # noqa: BLE001 — record + continue, never abort
+            await db.rollback()
+            state = await self._get_or_create_state(db, company.id, entity)
+            state.last_status = "error"
+            state.last_error = str(exc)[:500]
+            state.last_sync_at = started
+            await db.commit()
+            logger.exception(
+                "[Sync] FAILED company=%s entity=%s", company.id, entity)
+            return SyncResult(entity, status="error", error=str(exc))
+
+    async def sync_company(
+        self,
+        db: AsyncSession,
+        company,
+        *,
+        entities: Optional[list[str]] = None,
+        force_full: bool = False,
+    ) -> dict[str, SyncResult]:
+        """Sync every (or a subset of) entity for one company.
+
+        Entities run CONCURRENTLY — each on its OWN DB session — so the
+        wall-clock is the slowest single entity, not the sum of all eight
+        (~3-4x faster on a real org). Concurrent commits on one AsyncSession
+        aren't allowed, and a session-per-entity also keeps each entity's
+        transaction (and watermark) isolated. Distinct entities never touch the
+        same ``xero_sync_state`` / ``xero_document`` rows, so there's no
+        cross-entity contention. Per-entity isolation: one entity failing (or
+        crashing) never aborts the others. ``db`` is intentionally unused here —
+        each entity opens a fresh session.
+        """
+        targets = [
+            e for e in (entities or list(SYNC_ENTITIES)) if e in ENTITY_SPECS
+        ]
+
+        async def _sync_one(entity: str) -> SyncResult:
+            async with AsyncSessionLocal() as entity_db:
+                return await self.sync_entity(
+                    entity_db, company, entity, force_full=force_full,
+                )
+
+        gathered = await asyncio.gather(
+            *(_sync_one(e) for e in targets), return_exceptions=True,
+        )
+        results: dict[str, SyncResult] = {}
+        for entity, res in zip(targets, gathered):
+            if isinstance(res, BaseException):
+                logger.exception(
+                    "[Sync] entity=%s crashed", entity, exc_info=res)
+                results[entity] = SyncResult(
+                    entity, status="error", error=str(res))
+            else:
+                results[entity] = res
+
+        ok = sum(1 for r in results.values() if r.status == "ok")
+        records = sum(r.records for r in results.values())
+        logger.info(
+            "[Sync] company=%s done: %d/%d entities ok, %d records",
+            company.id, ok, len(results), records,
+        )
+        return results
+
+
+__all__ = [
+    "SyncEngine",
+    "SyncResult",
+    "EntitySpec",
+    "ENTITY_SPECS",
+    "parse_xero_datetime",
+    "format_if_modified_since",
+]

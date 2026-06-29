@@ -1,4 +1,4 @@
-"""Contact Defaults (Xenon parity, check #23).
+"""Contact Defaults (check #23).
 
 Detection now covers all four Xero contact defaults (sales/purchase × account/tax),
 emits current values + which are missing, and the Confirm write-back maps our
