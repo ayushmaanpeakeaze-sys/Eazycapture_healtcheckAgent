@@ -7,6 +7,7 @@ flagged issues.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date
 from typing import Awaitable, Callable, Optional
 
@@ -62,6 +63,9 @@ from app.modules.ai.checks_llm import (
 )
 
 ProgressCallback = Callable[[dict], Awaitable[None]]
+
+logger = logging.getLogger("eazycapture.healthcheck.orchestrator")
+
 
 async def run_batch_health_check(
     req: BatchHealthCheckRequest,
@@ -165,9 +169,34 @@ async def run_batch_health_check(
         if do_anomaly_llm
         else _noop_issues()
     )
+    # return_exceptions=True so a single LLM pass failing — Groq unreachable, a
+    # missing/blank GROQ_API_KEY, a timeout — degrades to its deterministic
+    # fallback instead of sinking the whole audit. The deterministic checks
+    # below MUST always run and return; an LLM enrichment problem is never
+    # allowed to zero the trapped count.
     category_issues, capital_issues, anomaly_issues = await asyncio.gather(
         category_task, capital_task, anomaly_task,
+        return_exceptions=True,
     )
+
+    def _llm_pass(issues, label):
+        if isinstance(issues, BaseException):
+            logger.warning(
+                "[Audit] LLM %s pass failed (%s); continuing deterministic-only",
+                label, type(issues).__name__,
+            )
+            return None
+        return issues
+
+    category_issues = _llm_pass(category_issues, "category")
+    anomaly_result = _llm_pass(anomaly_issues, "anomaly")
+    if isinstance(capital_issues, BaseException):
+        capital_issues = []
+    # If the anomaly LLM was attempted but failed, fall back to the deterministic
+    # amount_outlier flags below so outliers are still surfaced.
+    anomaly_llm_failed = anomaly_result is None
+    category_issues = category_issues or []
+    anomaly_issues = anomaly_result or []
 
     flagged: list[FlaggedIssue] = []
     for issues in per_tx_results:
@@ -185,9 +214,10 @@ async def run_batch_health_check(
     capital_universe = transactions + bank_transactions
     flagged.extend(_find_low_cost_fixed_assets(capital_universe, coa_type_lookup, coa_lookup, settings))
     flagged.extend(_find_capital_items(capital_universe, coa_lookup, coa_type_lookup, settings))
-    # If the LLM anomaly pass didn't run, fall back to the deterministic
-    # amount_outlier flags so outliers are still surfaced.
-    if not do_anomaly_llm and run_amount_outlier:
+    # If the LLM anomaly pass didn't run — disabled, no candidates, or it errored
+    # out — fall back to the deterministic amount_outlier flags so outliers are
+    # still surfaced.
+    if (not do_anomaly_llm or anomaly_llm_failed) and run_amount_outlier:
         flagged.extend(amount_outlier_flag(c) for c in outlier_candidates)
     # Duplicate invoices/bills key on the REAL ContactID — never the contact
     # alias — so two distinct ContactIDs are always treated as separate parties.
