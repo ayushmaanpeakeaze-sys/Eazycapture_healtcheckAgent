@@ -181,6 +181,15 @@ def _reshape_xero_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
     )
     description = str(description).strip() or "Invoice"
 
+    # A bill's human identifier is its Reference. Xero stores it in either the
+    # API Reference OR InvoiceNumber depending on how the bill was entered, and
+    # a bill has no separate "invoice number". So for purchase docs, fall back to
+    # InvoiceNumber when Reference is blank — this is what duplicate-matching keys
+    # on and what the UI shows as "Reference" for bills.
+    reference_value = _str_or_none(raw.get("Reference"))
+    if doc_type in ("ACCPAY", "ACCPAYCREDIT") and not reference_value:
+        reference_value = _str_or_none(raw.get("InvoiceNumber"))
+
     return {
         "transaction_id": invoice_id,
         "date": _xero_date(raw.get("Date")) or datetime.now(timezone.utc).date().isoformat(),
@@ -189,8 +198,9 @@ def _reshape_xero_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
         "vendor_name": vendor_name,
         # Contact.ContactID — the foreign key per-contact checks group on.
         "contact_id": (contact.get("ContactID") or "").strip() or None,
-        # Supplier's invoice number (optional — absent from the API when blank).
-        "reference": _str_or_none(raw.get("Reference")),
+        # Bill identifier (Xero Reference, or InvoiceNumber for bills that put it
+        # there). Duplicate-matching keys on this; the UI labels it "Reference".
+        "reference": reference_value,
         "tax_code": _str_or_none(first_line.get("TaxType")),
         "current_account_code": _str_or_none(first_line.get("AccountCode")),
         "invoice_number": _str_or_none(raw.get("InvoiceNumber")),
