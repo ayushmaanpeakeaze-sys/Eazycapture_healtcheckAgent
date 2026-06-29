@@ -1507,8 +1507,11 @@ def historical_audit_task(
         # Enrich only the newly-trapped rows so the cache is warm before
         # the user opens the dashboard. Uses the Celery task directly
         # (no HTTP roundtrip, no bulk-at-once rate-limit hit).
-        # Skipped on a duplicates-only run (no LLM at all — that's the point).
-        if trapped_rows and not dup_only:
+        # Skipped on a duplicates-only run (no LLM at all — that's the point)
+        # and whenever LLM checks are disabled: with no AI provider configured
+        # the pre-warm would only loop on connection errors. The deterministic
+        # flags are already persisted; re-enable via LLM_CHECKS_ENABLED.
+        if trapped_rows and not dup_only and settings.LLM_CHECKS_ENABLED:
             enrich_payloads = [
                 {
                     "document_id": row.get("transaction_id", ""),
@@ -1573,11 +1576,21 @@ def prewarm_insights_task(rows_payload: list[dict]) -> dict:
 
     Each payload entry has the same shape as reenrich_missing_task.
     """
+    from app.core.config import settings as _settings
+
+    # No AI provider when LLM checks are disabled — skip rather than loop on
+    # connection errors. The deterministic flags are already persisted, so the
+    # audit is complete without enrichment.
+    if not _settings.LLM_CHECKS_ENABLED:
+        logger.info(
+            "[SuHe][Prewarm] LLM checks disabled — skipping enrichment for %d row(s)",
+            len(rows_payload),
+        )
+        return {"cached": 0, "skipped": len(rows_payload), "reason": "llm_disabled"}
+
     import json as _json
     import redis as _redis_sync
     from groq import Groq
-
-    from app.core.config import settings as _settings
 
     rc = _redis_sync.from_url(_settings.REDIS_URL, decode_responses=True)
     client = Groq(api_key=_settings.GROQ_API_KEY)
