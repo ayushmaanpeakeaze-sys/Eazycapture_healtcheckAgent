@@ -29,4 +29,6 @@ HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
 
 # Run DB migrations (idempotent) before serving so a deploy always lands on a
 # schema matching the code. Web service only — workers override the start command.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}"]
+# Bind to :: (IPv6 + IPv4 dual-stack) so other Railway services can reach this
+# one over private networking, which is IPv6-only — 0.0.0.0 (IPv4) refuses it.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host :: --port ${PORT:-8001}"]
