@@ -761,36 +761,40 @@ def _call_rules_batch(
     # and keeps defaults for missing ones.
     rule_settings = cfg.get("settings") or None
 
-    flagged: list[dict[str, Any]] = []
-    timeout_s = settings.HEALTHCHECK_AI_TIMEOUT_MS / 1000
+    # Run the rules engine IN-PROCESS. The engine is the pure, framework-free
+    # logic in app/services/healthcheck — importable and runnable right here, so
+    # the worker needs no cross-service HTTP hop to the web (which was fragile:
+    # any restart/networking blip surfaced as a 'Connection refused' and the
+    # audit silently flagged nothing).
+    from app.schemas.transaction import BatchHealthCheckRequest
+    from app.services.healthcheck.orchestrator import run_batch_health_check
 
-    with httpx.Client(timeout=timeout_s) as client:
-        for start in range(0, len(transactions), _AI_BATCH_CHUNK):
-            chunk = transactions[start:start + _AI_BATCH_CHUNK]
-            payload: dict[str, Any] = {
-                "transactions": chunk,
-                "context": context,
-                "disabled_rules": disabled_rules,
-            }
-            if ignore_before:
-                payload["ignore_before"] = ignore_before
-            if rule_settings:
-                payload["settings"] = rule_settings
-            try:
-                resp = client.post(
-                    settings.HEALTHCHECK_AI_BATCH_URL,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                body = resp.json()
-            except Exception:
-                logger.exception(
-                    "[SuHe][Audit] rules-batch call failed for "
-                    "%d transactions; failing open",
-                    len(chunk),
-                )
-                continue
-            flagged.extend(body.get("flagged") or [])
+    flagged: list[dict[str, Any]] = []
+    for start in range(0, len(transactions), _AI_BATCH_CHUNK):
+        chunk = transactions[start:start + _AI_BATCH_CHUNK]
+        payload: dict[str, Any] = {
+            "transactions": chunk,
+            "context": context,
+            "disabled_rules": disabled_rules,
+        }
+        if ignore_before:
+            payload["ignore_before"] = ignore_before
+        if rule_settings:
+            payload["settings"] = rule_settings
+        try:
+            req = BatchHealthCheckRequest(**payload)
+            resp = asyncio.run(run_batch_health_check(req))
+            flagged.extend(
+                f.model_dump(mode="json") if hasattr(f, "model_dump") else f
+                for f in (resp.flagged or [])
+            )
+        except Exception:
+            logger.exception(
+                "[SuHe][Audit] in-process rules batch failed for "
+                "%d transactions; failing open",
+                len(chunk),
+            )
+            continue
     return flagged
 
 
