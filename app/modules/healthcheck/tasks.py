@@ -1,11 +1,11 @@
-"""Celery tasks for the healthcheck POC.
+"""Celery tasks for the healthcheck service.
 
 ``historical_audit_task`` does the same job regardless of where the
 invoices come from:
 
 1. Decide the data source — Nango (real Xero) when the company has a
    connection and the service is configured, otherwise seeded local
-   data (current POC default).
+   data (current default).
 2. Reshape every invoice into the 14-field shape the rules engine
    validates against.
 3. Post the batch to ``/api/v1/health-check/batch`` over HTTP.
@@ -52,7 +52,7 @@ from app.modules.healthcheck.services.audit_service import (
 )
 from app.modules.integrations.service import IntegrationService
 
-logger = logging.getLogger("hcpoc.audit.task")
+logger = logging.getLogger("eazycapture.audit.task")
 
 KIND_POST_LEDGER = "post_ledger"
 STATUS_BLOCKED = "blocked"
@@ -1689,7 +1689,7 @@ def prewarm_insights_task(rows_payload: list[dict]) -> dict:
 
 
 # =====================================================================
-# Re-enrichment sweep (Day 7)
+# Re-enrichment sweep
 # =====================================================================
 
 import time as _time  # local import keeps the top-of-file imports tidy
@@ -1785,10 +1785,11 @@ def reconcile_connections_task() -> dict[str, Any]:
             select(User).where(User.nango_connection_id.isnot(None))
         ).scalars().all()
         conn_to_user = {
-            u.nango_connection_id: u.id for u in users if u.nango_connection_id
+            u.nango_connection_id: (u.id, u.firm_id)
+            for u in users if u.nango_connection_id
         }
 
-    for connection_id, user_id in conn_to_user.items():
+    for connection_id, (user_id, firm_id) in conn_to_user.items():
         connections_checked += 1
         try:
             live = asyncio.run(integration.list_tenants(connection_id))
@@ -1829,6 +1830,7 @@ def reconcile_connections_task() -> dict[str, Any]:
             for tenant_id in live_ids - db_ids:
                 company = Company(
                     name=live_names.get(tenant_id) or "Untitled org",
+                    firm_id=firm_id,
                     nango_connection_id=connection_id,
                     xero_tenant_id=tenant_id,
                     is_active=True,

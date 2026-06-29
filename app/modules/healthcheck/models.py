@@ -57,6 +57,15 @@ class Company(Base):
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    # The tenant (firm/workspace) that owns this org. Companies are isolated per
+    # firm — a firm only ever sees its own. Nullable for legacy rows (backfilled
+    # to a default firm by the migration); set on every new connect.
+    firm_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("firm.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     xero_tenant_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     nango_connection_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -305,7 +314,7 @@ class BankDocument(Base):
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # POC storage: the file bytes live in the DB (statements are small). Swap for
+    # The file bytes live in the DB (statements are small). Swap for
     # object storage (S3/GCS) when volumes grow.
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     uploaded_by: Mapped[Optional[uuid.UUID]] = mapped_column(

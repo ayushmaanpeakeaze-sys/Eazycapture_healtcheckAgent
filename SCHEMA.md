@@ -1,16 +1,21 @@
 # Database Schema — EazyCapture AI Agent
 
-A modular monolith on PostgreSQL. Multi-tenant: **every tenant-scoped table
-carries `company_id`** (NOT NULL, indexed) and every query filters on it.
+A modular monolith on PostgreSQL with **two-level multi-tenancy:**
 
-The DB holds three kinds of data:
+- A **`firm`** is the top-level workspace — one per signup. It owns its users
+  and its connected Xero orgs; a firm never sees another firm's data.
+- Within a firm, **every tenant-scoped table carries `company_id`** (indexed)
+  and every query filters on it — one `company` = one Xero org.
 
-1. **Tenant + connection state** — which Xero orgs are connected (`company`).
-2. **A mirror of Xero** — invoices, bills, contacts, accounts, etc. synced
+The DB holds four kinds of data:
+
+1. **Firm + identity** — the workspace (`firm`) and its users (`app_user`).
+2. **Connection state** — which Xero orgs are connected (`company`).
+3. **A mirror of Xero** — invoices, bills, contacts, accounts, etc. synced
    locally so audits read from the DB instead of hitting Xero every time
    (`xero_document` + `xero_sync_state`). Xero stays the source of truth; this
    is a kept-fresh cache.
-3. **Audit output + review** — the issues each audit found, run history, and
+4. **Audit output + review** — the issues each audit found, run history, and
    the accountant's notes / uploaded evidence.
 
 ---
@@ -18,29 +23,53 @@ The DB holds three kinds of data:
 ## Relationship map (ASCII)
 
 ```
-                                  ┌─────────────┐
-                                  │   company   │  ← the tenant (one Xero org)
-                                  └──────┬──────┘
-        ┌───────────────┬───────────┬────┼────────┬──────────────┬───────────────┐
-        ▼               ▼           ▼    ▼         ▼              ▼               ▼
- ┌────────────┐ ┌─────────────┐ ┌──────────┐ ┌────────┐ ┌──────────────┐ ┌──────────────────┐
- │xero_sync_  │ │xero_document│ │health_   │ │audit_  │ │ bank_note /  │ │user_company_access│
- │state       │ │(Xero mirror)│ │check_    │ │batch   │ │bank_document │ └────────┬─────────┘
- │(watermark) │ └─────────────┘ │result    │ └────────┘ │(review)      │          │ (N:N join)
- └────────────┘                 └──────────┘            └──────────────┘   ┌──────▼──────┐
-                                                                            │  app_user   │ ← users (RBAC)
- ┌─────────┐                                                                └──────┬──────┘
- │ invoice │ ← seed/demo only                                                      │
- └────┬────┘                                                             ┌─────────▼────────┐
- ┌────▼──────────────┐                                                   │ notification_log │ ← email
- │ invoice_line_item │                                                   └──────────────────┘
- └───────────────────┘
+                         ┌─────────────┐
+                         │    firm     │  workspace / top-level tenant (one per signup)
+                         └──┬───────┬──┘  owns every company + user below it (firm_id FK)
+            firm_id  ┌──────┘       └──────┐  firm_id
+                     ▼                     ▼
+              ┌─────────────┐       ┌─────────────┐
+              │   company   │       │  app_user   │  users (RBAC)
+              │ one Xero org│       └──────┬──────┘
+              └──────┬──────┘              │ user_company_access (N:N: who sees which org)
+   ┌───────────┬─────┼─────┬───────────┐  ├─────────────────┐
+   ▼           ▼     ▼     ▼           ▼  ▼                 ▼
+xero_sync_  xero_   health_ audit_  bank_note/      notification_log (email)
+state       document check_  batch   bank_document
+(watermark) (mirror) result
+
+ invoice → invoice_line_item   ← seed/demo only (live audit uses xero_document)
 ```
 
-The five tables hanging directly off `company` that matter for the live audit:
-`xero_sync_state` + `xero_document` (the Xero mirror), `health_check_result` +
-`audit_batch` (audit output), and `bank_note`/`bank_document` (review). The
-`invoice` tables are seed-only.
+Everything is scoped first by `firm_id`, then by `company_id`. The five tables
+hanging off `company` that matter for the live audit: `xero_sync_state` +
+`xero_document` (the Xero mirror), `health_check_result` + `audit_batch` (audit
+output), and `bank_note`/`bank_document` (review). The `invoice` tables are
+seed-only.
+
+---
+
+## 0. Firm isolation (the workspace model)
+
+Each signup creates a **`firm`** — an isolated workspace — with the signing-up
+user as its admin. Everything else hangs off it:
+
+- `app_user.firm_id` — every user belongs to one firm.
+- `company.firm_id` — every connected Xero org belongs to one firm.
+
+A firm's admin sees only their firm's orgs and team; a user in Firm A can never
+read Firm B's data. Isolation is enforced at two choke points:
+
+- **`get_current_company_id`** (single-org routes) — a company in another firm
+  returns **404** (never even confirmed to exist).
+- **`allowed_company_ids_for`** (cross-org / panorama views) — returns only the
+  caller's firm companies.
+
+`company_id` scoping is the second layer: even within a firm, a "selected"-mode
+team member only sees the orgs an admin assigned to them.
+
+> The script-created **super-admin** (`scripts/create_admin`) has no firm and is
+> the platform operator — it can reach every firm (support / debugging).
 
 ---
 
@@ -133,6 +162,8 @@ the DB and kept fresh incrementally.
 
 ```mermaid
 erDiagram
+    firm ||--o{ company : "owns"
+    firm ||--o{ app_user : "owns"
     company ||--o{ xero_sync_state : "sync state"
     company ||--o{ xero_document : "mirrored Xero data"
     company ||--o{ health_check_result : "audit findings"
@@ -145,8 +176,15 @@ erDiagram
     app_user ||--o{ user_company_access : "assigned"
     app_user ||--o{ notification_log : "sent to"
 
+    firm {
+        uuid id PK
+        text name "workspace name"
+        timestamptz created_at
+    }
+
     company {
         uuid id PK
+        uuid firm_id FK "owning workspace"
         text name
         text xero_tenant_id "the Xero org"
         text nango_connection_id "the OAuth grant"
@@ -224,6 +262,7 @@ erDiagram
 
     app_user {
         uuid id PK
+        uuid firm_id FK "owning workspace"
         text email
         varchar role "admin | team_member"
         varchar company_access_mode "all | selected"
@@ -267,10 +306,15 @@ erDiagram
 
 ## 5. Tables by purpose
 
+### Firm / workspace (top-level tenant)
+| Table | Purpose |
+|---|---|
+| `firm` | one workspace, created per signup. Owns its users (`app_user.firm_id`) and connected orgs (`company.firm_id`). The isolation boundary — a firm never sees another firm's data. |
+
 ### Tenant + connection
 | Table | Purpose |
 |---|---|
-| `company` | one connected Xero org. Natural key `(nango_connection_id, xero_tenant_id)`. `audit_config` (JSONB) holds per-org settings — disabled rules, bank-account excludes, marked-ok, manual statement balances. |
+| `company` | one connected Xero org, owned by a `firm` (`firm_id`). Natural key `(nango_connection_id, xero_tenant_id)`. `audit_config` (JSONB) holds per-org settings — disabled rules, bank-account excludes, marked-ok, manual statement balances. |
 
 ### Xero mirror (DB-backed sync)
 | Table | Purpose |
@@ -289,8 +333,8 @@ erDiagram
 ### Identity / RBAC
 | Table | Purpose |
 |---|---|
-| `app_user` | users (admin / team_member), invite tokens, `company_access_mode`. |
-| `user_company_access` | N:N join — which companies each "selected"-mode member can access. |
+| `app_user` | users (admin / team_member), owned by a `firm` (`firm_id`). Holds invite tokens + `company_access_mode`. |
+| `user_company_access` | N:N join — which companies each "selected"-mode member can access (within their firm). |
 
 ### Notifications
 | Table | Purpose |
@@ -339,6 +383,8 @@ result = {
 
 | From | → To | On delete |
 |---|---|---|
+| `company.firm_id` | `firm.id` | CASCADE |
+| `app_user.firm_id` | `firm.id` | CASCADE |
 | `xero_sync_state.company_id` | `company.id` | CASCADE |
 | `xero_document.company_id` | `company.id` | CASCADE |
 | `health_check_result.company_id` | `company.id` | CASCADE |
@@ -350,15 +396,15 @@ result = {
 | `notification_log.user_id` | `app_user.id` | SET NULL |
 
 Deleting a `company` cascades to all its mirrored data, audit history, notes
-and uploads.
+and uploads. Deleting a `firm` cascades to all its companies and users.
 
 ---
 
 ## Design notes
 
-- **Multi-tenant by construction:** every audit/sync table has `company_id`
-  (indexed, NOT NULL); every query filters on it; cross-tenant leak guards are
-  enforced by tests.
+- **Two-level multi-tenancy:** `firm` is the workspace boundary (each signup is
+  isolated); within a firm every audit/sync table carries `company_id` (indexed),
+  and every query filters on it. Both layers are enforced by tests.
 - **Xero is the source of truth; the DB is a kept-fresh mirror** — `xero_document`
   is refreshed incrementally and can always be rebuilt from Xero.
 - **Each module owns its own model file**; tables link by name (no cross-module

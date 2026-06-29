@@ -20,6 +20,23 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base, uuid_pk
 
 
+class Firm(Base):
+    """A tenant / workspace — the top-level isolation boundary.
+
+    Every user and every company belongs to exactly one firm; a firm never sees
+    another firm's orgs, team or data. A self-service signup creates a new firm
+    with the signing-up user as its admin.
+    """
+
+    __tablename__ = "firm"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
 class User(Base):
     """An app user. Two roles only:
 
@@ -38,6 +55,15 @@ class User(Base):
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    # The tenant this user belongs to. Nullable only for legacy rows created
+    # before multi-tenancy (backfilled to a default firm by the migration);
+    # every signup sets it.
+    firm_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("firm.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     email: Mapped[str] = mapped_column(Text, nullable=False)
     full_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # admin | team_member
@@ -115,4 +141,4 @@ class UserCompanyAccess(Base):
     user: Mapped["User"] = relationship(back_populates="company_access")
 
 
-__all__ = ["User", "UserCompanyAccess"]
+__all__ = ["Firm", "User", "UserCompanyAccess"]

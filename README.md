@@ -59,7 +59,7 @@ app/
 │   └── insights/      KPI computation
 │
 ├── modules/     The web/domain layer — FastAPI routers + DB models + Celery tasks
-│   ├── auth/             users, login, JWT
+│   ├── auth/             firms, users, signup, login, JWT
 │   ├── healthcheck/      audit domain: models, routers, tasks, domain services
 │   ├── integrations/     external systems
 │   │   ├── nango/        our backend's Nango/Xero client (Python)
@@ -205,12 +205,21 @@ The equivalent raw commands (what the `make` targets run):
 
 ---
 
-## Multi-tenancy (strict)
+## Multi-tenancy (two levels)
 
-Every tenant-scoped table carries `company_id` (NOT NULL, indexed), every
-endpoint resolves + access-checks the company via `get_current_company_id`, and
-every query filters on `company_id`. Cross-tenant leak guards are locked in by
-tests against a live database.
+**Firm (workspace) → company (Xero org).** Each signup
+(`POST /api/v1/auth/register`) creates an isolated **firm** with its own admin.
+A firm owns its team and its connected Xero orgs and never sees another firm's
+data. Within a firm, every tenant-scoped table carries `company_id` (indexed)
+and every query filters on it.
+
+Isolation is enforced at two choke points — `get_current_company_id` (a company
+in another firm returns 404) and `allowed_company_ids_for` (cross-org views
+return only the firm's companies) — backed by repository-layer `company_id`
+filtering. Both layers are locked in by tests against a live database.
+
+The script-created super-admin (`scripts/create_admin`) has no firm and is the
+platform operator (support / debugging) — it can see every firm.
 
 ---
 

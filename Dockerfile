@@ -27,4 +27,6 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
     CMD python -c "import os,urllib.request,sys; p=os.environ.get('PORT','8001'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health', timeout=2).status==200 else 1)"
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}"]
+# Run DB migrations (idempotent) before serving so a deploy always lands on a
+# schema matching the code. Web service only — workers override the start command.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}"]

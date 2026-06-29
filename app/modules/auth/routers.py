@@ -45,12 +45,13 @@ from app.modules.auth.schemas import (
     InviteResponse,
     LoginRequest,
     MeResponse,
+    RegisterRequest,
     RemoveResponse,
     TokenResponse,
     UserListResponse,
     UserSummary,
 )
-from app.modules.auth.models import User, UserCompanyAccess
+from app.modules.auth.models import Firm, User, UserCompanyAccess
 from app.modules.healthcheck.models import Company
 from app.modules.notifications import DeliveryResult, Recipient, notification_service
 from app.modules.notifications.persistence import record_send
@@ -72,13 +73,17 @@ async def _assigned_company_ids(db: AsyncSession, user_id: UUID) -> list[UUID]:
     return [r[0] for r in rows.all()]
 
 
-async def _validate_company_ids(db: AsyncSession, company_ids: list[UUID]) -> None:
-    """Raise 400 if any id isn't a real, active company."""
+async def _validate_company_ids(
+    db: AsyncSession, company_ids: list[UUID], firm_id: UUID | None = None,
+) -> None:
+    """Raise 400 if any id isn't a company the firm owns. When ``firm_id`` is
+    given, a company outside the firm reads as 'unknown' (never revealed)."""
     if not company_ids:
         return
-    rows = await db.execute(
-        select(Company.id).where(Company.id.in_(company_ids))
-    )
+    q = select(Company.id).where(Company.id.in_(company_ids))
+    if firm_id is not None:
+        q = q.where(Company.firm_id == firm_id)
+    rows = await db.execute(q)
     found = {r[0] for r in rows.all()}
     missing = [str(c) for c in company_ids if c not in found]
     if missing:
@@ -86,6 +91,25 @@ async def _validate_company_ids(db: AsyncSession, company_ids: list[UUID]) -> No
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unknown company id(s): {', '.join(missing)}",
         )
+
+
+async def _firm_id_for(db: AsyncSession, user_id: UUID | None) -> UUID | None:
+    """The firm a user belongs to (None for the script-created super-admin)."""
+    if user_id is None:
+        return None
+    return (
+        await db.execute(select(User.firm_id).where(User.id == user_id))
+    ).scalar_one_or_none()
+
+
+async def _load_managed_user(db: AsyncSession, user_id: UUID, admin: CurrentUser) -> User:
+    """Load a user the admin is allowed to manage. A user in another firm reads
+    as 404 (never revealed). A firm-less super-admin can manage anyone."""
+    user = await _load_managed_user(db, user_id, admin)
+    admin_firm = await _firm_id_for(db, admin.user_id)
+    if admin_firm is not None and user.firm_id != admin_firm:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return user
 
 
 def _accept_url(token: str) -> str:
@@ -162,6 +186,51 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
 
     # Success clears the counter so a legitimate user is never locked out.
     await reset_login_failures(email)
+    token = create_access_token(user_id=user.id, email=user.email, role=user.role)
+    return TokenResponse(
+        access_token=token, role=user.role, user_id=user.id, email=user.email,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Register (self-service signup → new firm + its first admin)
+# ---------------------------------------------------------------------------
+
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+    """Create a new firm (workspace) + its first admin, then sign them in.
+
+    Each signup is an isolated tenant: the new admin only ever sees their own
+    firm's team and Xero orgs.
+    """
+    email = payload.email.strip().lower()
+
+    existing = (
+        await db.execute(select(User.id).where(User.email == email))
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    firm_name = (payload.firm_name or "").strip() or f"{email.split('@')[0]}'s workspace"
+    firm = Firm(name=firm_name)
+    db.add(firm)
+    await db.flush()  # firm.id
+
+    user = User(
+        firm_id=firm.id,
+        email=email,
+        full_name=(payload.full_name or "").strip() or None,
+        role="admin",
+        status="active",
+        company_access_mode="all",
+        password_hash=hash_password(payload.password),
+    )
+    db.add(user)
+    await db.commit()
+
     token = create_access_token(user_id=user.id, email=user.email, role=user.role)
     return TokenResponse(
         access_token=token, role=user.role, user_id=user.id, email=user.email,
@@ -259,13 +328,21 @@ async def me(
 ) -> MeResponse:
     access_mode = "all" if user.is_admin else "selected"
     company_ids: list[UUID] = []
-    if user.user_id is not None and not user.is_admin:
+    firm_id: UUID | None = None
+    firm_name: str | None = None
+    if user.user_id is not None:
         db_user = (
             await db.execute(select(User).where(User.id == user.user_id))
         ).scalar_one_or_none()
         if db_user is not None:
-            access_mode = db_user.company_access_mode
-        if access_mode != "all":
+            firm_id = db_user.firm_id
+            if not user.is_admin:
+                access_mode = db_user.company_access_mode
+        if firm_id is not None:
+            firm_name = (
+                await db.execute(select(Firm.name).where(Firm.id == firm_id))
+            ).scalar_one_or_none()
+        if not user.is_admin and access_mode != "all":
             company_ids = await _assigned_company_ids(db, user.user_id)
     return MeResponse(
         user_id=user.user_id,
@@ -273,6 +350,8 @@ async def me(
         role=user.role,  # type: ignore[arg-type]
         access_mode=access_mode,  # type: ignore[arg-type]
         assigned_company_ids=company_ids,
+        firm_id=firm_id,
+        firm_name=firm_name,
     )
 
 
@@ -297,13 +376,16 @@ async def invite_team_member(
             detail="A user with this email already exists.",
         )
 
+    # Invitee joins the admin's firm; only that firm's companies are assignable.
+    firm_id = await _firm_id_for(db, admin.user_id)
     # "all" mode ignores the company list (flag-based access to everything).
     selected_ids = [] if payload.access_mode == "all" else payload.company_ids
-    await _validate_company_ids(db, selected_ids)
+    await _validate_company_ids(db, selected_ids, firm_id)
 
     invite_token = generate_invite_token()
     expires = datetime.now(timezone.utc) + timedelta(days=INVITE_TTL_DAYS)
     user = User(
+        firm_id=firm_id,
         email=email,
         full_name=(payload.full_name or "").strip() or None,
         role="team_member",
@@ -356,9 +438,11 @@ async def list_users(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> UserListResponse:
-    users = (
-        await db.execute(select(User).order_by(User.created_at.asc()))
-    ).scalars().all()
+    admin_firm = await _firm_id_for(db, admin.user_id)
+    q = select(User).order_by(User.created_at.asc())
+    if admin_firm is not None:
+        q = q.where(User.firm_id == admin_firm)
+    users = (await db.execute(q)).scalars().all()
 
     summaries: list[UserSummary] = []
     for u in users:
@@ -388,11 +472,7 @@ async def set_user_companies(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> UserSummary:
-    user = (
-        await db.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found.")
+    user = await _load_managed_user(db, user_id, admin)
     if user.role == "admin":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -401,7 +481,7 @@ async def set_user_companies(
 
     # "all" mode ignores the company list and grants access to everything.
     selected_ids = [] if payload.access_mode == "all" else payload.company_ids
-    await _validate_company_ids(db, selected_ids)
+    await _validate_company_ids(db, selected_ids, user.firm_id)
 
     user.company_access_mode = payload.access_mode
 
@@ -440,11 +520,7 @@ async def disable_user(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> UserSummary:
-    user = (
-        await db.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found.")
+    user = await _load_managed_user(db, user_id, admin)
     if user.id == admin.user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -481,11 +557,7 @@ async def enable_user(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> UserSummary:
-    user = (
-        await db.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found.")
+    user = await _load_managed_user(db, user_id, admin)
     if user.status == "invited":
         # Invited users have no password yet — enabling would skip the
         # invite flow. The admin should resend the invite instead.
@@ -508,11 +580,7 @@ async def resend_invite(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> InviteResponse:
-    user = (
-        await db.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found.")
+    user = await _load_managed_user(db, user_id, admin)
     if user.status != "invited":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -560,11 +628,7 @@ async def remove_user(
     admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> RemoveResponse:
-    user = (
-        await db.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found.")
+    user = await _load_managed_user(db, user_id, admin)
     if user.id == admin.user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

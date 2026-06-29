@@ -37,6 +37,20 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=256)
 
 
+class RegisterRequest(BaseModel):
+    """Self-service signup: creates a new firm with this user as its admin."""
+
+    email: str = Field(..., max_length=255)
+    password: str = Field(..., min_length=8, max_length=256)
+    full_name: Optional[str] = Field(default=None, max_length=255)
+    firm_name: Optional[str] = Field(default=None, max_length=120)
+
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str) -> str:
+        return _normalize_email(v)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -138,3 +152,5 @@ class MeResponse(BaseModel):
     role: Role
     access_mode: AccessMode = "selected"
     assigned_company_ids: list[UUID] = Field(default_factory=list)
+    firm_id: Optional[UUID] = None
+    firm_name: Optional[str] = None

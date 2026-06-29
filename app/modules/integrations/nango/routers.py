@@ -36,7 +36,7 @@ from app.modules.healthcheck.services.audit_service import AuditService
 from app.modules.integrations.nango.service import NangoService
 from app.modules.integrations.service import IntegrationService
 
-logger = logging.getLogger("hcpoc.nango.router")
+logger = logging.getLogger("eazycapture.nango.router")
 
 router = APIRouter(tags=["nango"])
 
@@ -60,7 +60,7 @@ async def create_connect_session(
 
     The Nango ``end_user.id`` is the AUTHENTICATED user's id — so when the
     auth.creation webhook fires, we know which accountant connected and can
-    link every org they bring in to that account. In POC mode (no real
+    link every org they bring in to that account. In demo mode (no real
     user) we fall back to ``NANGO_USER_ID`` so demos still work.
     """
     nango = NangoService()
@@ -74,12 +74,12 @@ async def create_connect_session(
                 ),
             },
         )
-    # Authenticated user → use their UUID. POC mode (user_id is None) →
+    # Authenticated user → use their UUID. Demo mode (user_id is None) →
     # fall back to the configured demo user id.
     if user.user_id is not None:
         end_user_id = str(user.user_id)
     else:
-        end_user_id = (settings.NANGO_USER_ID or "poc-demo-user").strip()
+        end_user_id = (settings.NANGO_USER_ID or "demo-user").strip()
 
     payload = await nango.create_xero_connect_session(end_user_id=end_user_id)
     if payload is None:
@@ -203,7 +203,7 @@ async def nango_webhook(
 def _verify_signature(body: bytes, signature: Optional[str]) -> bool:
     """Return True when the signature matches the configured secret.
 
-    Skip-with-warning when the secret is unset (POC default) so the
+    Skip-with-warning when the secret is unset (demo default) so the
     webhook handler still functions during demos without forcing
     HMAC config.
     """
@@ -243,7 +243,7 @@ def _classify_event(payload: dict[str, Any]) -> tuple[str, str]:
 
 def _user_id_from_payload(payload: dict[str, Any]) -> Optional[UUID]:
     """The Nango ``end_user.id`` is the AUTHENTICATED accountant's UUID
-    (set in connect-session). Returns None for POC/demo connects where the
+    (set in connect-session). Returns None for demo connects where the
     end_user id is a non-UUID label like ``test_ayushmaan_singh`` — in that
     case we still create the orgs, just without a user link."""
     end_user = payload.get("endUser") or payload.get("end_user") or {}
@@ -272,8 +272,8 @@ async def _handle_auth_creation(
         logger.warning("%s auth.creation missing connectionId", _LOG_TAG)
         return
 
-    # The accountant who connected (None in POC/demo — orgs still created,
-    # just not access-linked; the synthetic POC admin sees all anyway).
+    # The accountant who connected (None in demo — orgs still created,
+    # just not access-linked; the synthetic demo admin sees all anyway).
     user_id = _user_id_from_payload(payload)
     user: Optional[User] = None
     if user_id is not None:
@@ -310,9 +310,12 @@ async def _handle_auth_creation(
                 )
             )
         ).scalar_one_or_none()
+        # The org belongs to the connecting accountant's firm (None in demo).
+        firm_id = user.firm_id if user is not None else None
         if company is None:
             company = Company(
                 name=tenant_name,
+                firm_id=firm_id,
                 nango_connection_id=connection_id,
                 xero_tenant_id=tenant_id,
                 is_active=True,
@@ -323,6 +326,8 @@ async def _handle_auth_creation(
         else:
             company.name = tenant_name or company.name
             company.is_active = True
+            if company.firm_id is None and firm_id is not None:
+                company.firm_id = firm_id
 
         # Link the connecting accountant to this org (idempotent).
         if user is not None:
