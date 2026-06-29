@@ -33,6 +33,16 @@ async def compute_company_snapshot(
         integ.fetch_bank_summary(connection_id, tenant_id),
     )
 
+    # A failed report fetch (Xero connection needs re-auth, transient proxy
+    # error) returns None. Computing on that would silently produce an all-zero
+    # snapshot and overwrite the last good one. Treat a missing P&L — the core
+    # report behind profit + sales — as a failure so the caller keeps the
+    # previous snapshot (marked stale) instead of replacing it with zeros.
+    if pnl is None:
+        raise RuntimeError(
+            "Xero ProfitAndLoss report unavailable — connection may need re-auth"
+        )
+
     profitability = compute_profitability(pnl)
     sales_tracker = compute_sales_tracker(pnl)
     position = compute_financial_position(bs)
