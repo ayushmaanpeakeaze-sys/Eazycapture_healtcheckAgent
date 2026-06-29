@@ -105,7 +105,11 @@ async def _firm_id_for(db: AsyncSession, user_id: UUID | None) -> UUID | None:
 async def _load_managed_user(db: AsyncSession, user_id: UUID, admin: CurrentUser) -> User:
     """Load a user the admin is allowed to manage. A user in another firm reads
     as 404 (never revealed). A firm-less super-admin can manage anyone."""
-    user = await _load_managed_user(db, user_id, admin)
+    user = (
+        await db.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
     admin_firm = await _firm_id_for(db, admin.user_id)
     if admin_firm is not None and user.firm_id != admin_firm:
         raise HTTPException(status_code=404, detail="User not found.")
