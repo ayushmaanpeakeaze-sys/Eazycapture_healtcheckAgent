@@ -186,7 +186,11 @@ def _load() -> Settings:
         NANGO_USER_ID=os.environ.get("NANGO_USER_ID", "demo-user"),
         NANGO_XERO_INTEGRATION_ID=os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero"),
         MAX_NANGO_PAGES=int(os.environ.get("MAX_NANGO_PAGES", "10")),
-        AUDIT_SOURCE=os.environ.get("AUDIT_SOURCE", "proxy").strip().lower(),
+        # Default to the DB-backed source: when an org has synced data the audit
+        # reads it (complete + fast); it falls back to a live fetch automatically
+        # when nothing is synced yet. Override to "proxy"/"action" only for live
+        # debugging.
+        AUDIT_SOURCE=os.environ.get("AUDIT_SOURCE", "db").strip().lower(),
         APP_ENV=os.environ.get("APP_ENV", "development").strip().lower(),
         AUTH_DISABLED=_as_bool(os.environ.get("AUTH_DISABLED", "false")),
         JWT_SECRET=os.environ.get("JWT_SECRET", ""),
