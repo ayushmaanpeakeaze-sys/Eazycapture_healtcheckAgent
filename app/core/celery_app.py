@@ -1,4 +1,4 @@
-"""Celery application for the healthcheck POC.
+"""Celery application for the healthcheck service.
 
 Owns one queue used by the historical-audit task. Broker + result
 backend point at the same Redis the rest of the app uses, but on

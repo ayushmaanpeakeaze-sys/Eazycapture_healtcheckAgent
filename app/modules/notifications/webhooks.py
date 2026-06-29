@@ -25,7 +25,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.modules.notifications.persistence import apply_delivery_event
 
-logger = logging.getLogger("hcpoc.notifications.webhook")
+logger = logging.getLogger("eazycapture.notifications.webhook")
 
 router = APIRouter(tags=["webhooks"])
 

@@ -22,7 +22,7 @@ from app.modules.healthcheck.schemas import (
 )
 from app.modules.healthcheck.xero_links import xero_deep_link
 
-logger = logging.getLogger("hcpoc.suggest_fix")
+logger = logging.getLogger("eazycapture.suggest_fix")
 
 
 class SuggestFixService:

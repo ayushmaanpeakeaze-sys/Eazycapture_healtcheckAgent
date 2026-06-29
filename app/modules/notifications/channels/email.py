@@ -31,7 +31,7 @@ from app.modules.notifications.channels.base import (
     Recipient,
 )
 
-logger = logging.getLogger("hcpoc.notifications.email")
+logger = logging.getLogger("eazycapture.notifications.email")
 
 _TIMEOUT_S = 15.0
 

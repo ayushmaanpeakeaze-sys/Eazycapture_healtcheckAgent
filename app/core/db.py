@@ -1,6 +1,6 @@
 """Async SQLAlchemy engine + session factory + FastAPI dependency.
 
-Used by the DB-backed POC routes under /api/v1/health/*. The existing
+Used by the DB-backed routes under /api/v1/health/*. The existing
 AI service endpoints (validate-invoice, health-check/batch, etc.) are
 stateless and do not import from here.
 """

@@ -1,4 +1,4 @@
-"""Day 6 — Nango integration tests.
+"""Nango integration tests.
 
 These never hit the real ``api.nango.dev``: we either drive
 :class:`NangoClient` with an empty secret (which short-circuits to

@@ -2,8 +2,8 @@
 
 Yes, the rules engine lives in the same FastAPI process today — so an
 in-process import would technically work. We keep it behind ``httpx``
-on purpose: Day 6 may move the engine to a remote service, and the
-contract is the seam we want to swap. Fail-open by design.
+on purpose so the engine can move to a separate service without changing
+callers — the HTTP contract is the seam. Fail-open by design.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import httpx
 
 from app.core.config import settings
 
-logger = logging.getLogger("hcpoc.ai_client")
+logger = logging.getLogger("eazycapture.ai_client")
 
 
 async def suggest_fix(

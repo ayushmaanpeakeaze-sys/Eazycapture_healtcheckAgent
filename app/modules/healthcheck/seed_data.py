@@ -1,4 +1,4 @@
-"""Idempotent demo-data seed for the healthcheck POC.
+"""Idempotent demo-data seed for the healthcheck service.
 
 Run with:
 

@@ -14,8 +14,8 @@ Responsibilities, in order:
 6. Reject placeholder values for ``InvoiceNumber`` (frontend should
    prompt the user for a real number instead of writing "FIXME-001"
    to Xero).
-7. Delegate to :class:`ResolveService` — which today stubs the
-   Xero PUT and tomorrow (Day 6) calls Nango.
+7. Delegate to :class:`ResolveService` — which writes to Xero via Nango
+   when the org is connected, otherwise records the intent.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ from app.modules.healthcheck.services.suggest_fix_service import (
 )
 from app.modules.healthcheck.xero_links import xero_deep_link
 
-logger = logging.getLogger("hcpoc.apply_ai_fix")
+logger = logging.getLogger("eazycapture.apply_ai_fix")
 
 _FIELD_ALIASES: dict[str, str] = {
     "TaxCode": "TaxType",
@@ -204,7 +204,7 @@ class ApplyAiFixService:
                 ai_fix_strategy=suggestion.fix_strategy,
             )
 
-        # 8. Delegate to ResolveService (which stubs Xero for Day 5).
+        # 8. Delegate to ResolveService (writes to Xero via Nango when connected).
         resolve_response = await self._resolve.resolve(
             row_id=effective_row.id,
             company_id=company_id,

@@ -15,7 +15,7 @@ from app.modules.healthcheck.xero_links import xero_deep_link
 from app.modules.integrations.service import IntegrationService
 from app.services.healthcheck.unreconciled_bank import compute_unreconciled_accounts
 
-logger = logging.getLogger("hcpoc.unreconciled_bank_service")
+logger = logging.getLogger("eazycapture.unreconciled_bank_service")
 
 
 def _excluded(cfg: dict[str, Any]) -> set[str]:

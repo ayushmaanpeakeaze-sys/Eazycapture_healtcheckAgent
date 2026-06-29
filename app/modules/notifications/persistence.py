@@ -18,7 +18,7 @@ from app.modules.auth.models import User
 from app.modules.notifications.channels.base import DeliveryResult
 from app.modules.notifications.models import NotificationLog
 
-logger = logging.getLogger("hcpoc.notifications.persistence")
+logger = logging.getLogger("eazycapture.notifications.persistence")
 
 # Map raw provider event names → our normalized status. ``None`` = ignore
 # (transient events like 'deferred'/'processed' shouldn't overwrite status).

@@ -1,4 +1,4 @@
-"""Day 5 — resolve / dismiss / apply-ai-fix tests.
+"""Resolve / dismiss / apply-ai-fix tests.
 
 Each test creates its own scratch company + rows so the live Demo Co
 data and the other test modules don't interfere. Tests pass the AI

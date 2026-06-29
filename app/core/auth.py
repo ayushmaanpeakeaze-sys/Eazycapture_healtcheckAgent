@@ -6,7 +6,7 @@ login / invite-accept.
 
 Dependencies:
 * ``get_current_user``      — decode the bearer token → ``CurrentUser``.
-                              In POC mode (no ``JWT_SECRET`` or
+                              In demo mode (no ``JWT_SECRET`` or
                               ``AUTH_DISABLED=true``) returns a synthetic
                               admin so existing demos keep working.
 * ``require_admin``         — 403 unless the caller is an admin.
@@ -30,7 +30,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import decode_access_token
 
-logger = logging.getLogger("hcpoc.auth")
+logger = logging.getLogger("eazycapture.auth")
 
 ROLE_ADMIN = "admin"
 ROLE_TEAM_MEMBER = "team_member"
@@ -47,8 +47,8 @@ class CurrentUser:
         return self.role == ROLE_ADMIN
 
 
-# Synthetic user used in POC/demo mode so the UI stays open.
-_POC_USER = CurrentUser(user_id=None, email="poc@demo.local", role=ROLE_ADMIN)
+# Synthetic user used in demo mode (auth disabled) so the UI stays open.
+_DEMO_USER = CurrentUser(user_id=None, email="demo@local", role=ROLE_ADMIN)
 
 
 async def get_current_user(
@@ -57,7 +57,7 @@ async def get_current_user(
 ) -> CurrentUser:
     """Decode the bearer token into a :class:`CurrentUser`.
 
-    * ``JWT_SECRET`` unset or ``AUTH_DISABLED`` set → POC mode → returns
+    * ``JWT_SECRET`` unset or ``AUTH_DISABLED`` set → demo mode → returns
       a synthetic admin.
     * Missing/invalid token → 401.
     * Valid token → re-checked against the DB so a disabled or deleted
@@ -66,7 +66,7 @@ async def get_current_user(
       admin's role change also takes effect on the user's next request.
     """
     if settings.AUTH_DISABLED or not (settings.JWT_SECRET or "").strip():
-        return _POC_USER
+        return _DEMO_USER
 
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(

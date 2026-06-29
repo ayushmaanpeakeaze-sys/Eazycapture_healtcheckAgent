@@ -25,7 +25,7 @@ from app.modules.integrations.service import IntegrationService
 from app.services.healthcheck.audit_settings import AuditSettings
 from app.services.insights.bank import _parse_trial_balance_balances
 
-logger = logging.getLogger("hcpoc.bank_balance_service")
+logger = logging.getLogger("eazycapture.bank_balance_service")
 
 
 def _dec(value: Any) -> Optional[Decimal]:

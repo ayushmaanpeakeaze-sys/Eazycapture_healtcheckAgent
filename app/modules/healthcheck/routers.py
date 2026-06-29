@@ -1,15 +1,10 @@
-"""HTTP surface for the healthcheck POC, mounted at ``/api/v1/health``.
+"""HTTP surface for the healthcheck domain, mounted at ``/api/v1/health``.
 
-Day 3 ships two routes:
-
-* ``POST /sync-xero-history/{company_id}/`` — fire-and-forget audit
-  dispatch. Returns 202 + ``batch_id`` within a few ms; the actual work
-  happens in the Celery worker.
-* ``GET  /sync-xero-history-status/{batch_id}/`` — polled by the
-  frontend. Pure Redis read; no DB hit.
-
-More routes (trapped-invoices, resolve, suggest-fix, apply-ai-fix,
-summary, panorama) land in Days 4-7.
+Covers audit dispatch + status polling, the trapped-invoices feed, the
+resolve / dismiss / suggest-fix / apply-ai-fix flow, bank-balance checks,
+per-company summaries and the cross-company panorama. Slow work (audits,
+enrichment) is dispatched to Celery; the routes return quickly and the
+frontend polls for results.
 """
 from __future__ import annotations
 
@@ -509,9 +504,8 @@ async def resolve_trapped(
     company_id: UUID = Depends(get_current_company_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """For Day 5, the Xero PUT is stubbed inside ``ResolveService``.
-    Day 6 swaps the stub for the real Nango call without touching this
-    route."""
+    """Resolve a trapped row. The Xero write goes through ``ResolveService``
+    (via Nango when the org is connected, otherwise a stub response)."""
     service = ResolveService(db)
     response = await service.resolve(
         row_id=row_id,
@@ -873,7 +867,7 @@ async def sync_xero_history_status(
 
 
 # =====================================================================
-# Day 7 — panorama, summary, re-enrich
+# Panorama, summary, re-enrich
 # =====================================================================
 
 @router.get(

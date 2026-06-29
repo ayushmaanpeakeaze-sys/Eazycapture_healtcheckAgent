@@ -1,4 +1,4 @@
-"""Pydantic v2 schemas for the healthcheck POC HTTP surface."""
+"""Pydantic v2 schemas for the healthcheck HTTP surface."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -137,7 +137,7 @@ class HealthCheckResultsResponse(BaseModel):
     offset: int
 
 
-# ---------- Resolution flow (Day 5) ----------
+# ---------- Resolution flow ----------
 
 class ResolveRequest(BaseModel):
     field_updates: dict[str, str] = Field(default_factory=dict)
@@ -363,7 +363,7 @@ class ApplyAiFixRequest(BaseModel):
     suggestion: Optional[SuggestFixSuggestion] = None
 
 
-# ---------- Day 7 — Panorama + Summary + Re-enrich ----------
+# ---------- Panorama + Summary + Re-enrich ----------
 
 class CompanyHealthRow(BaseModel):
     """One row of the multi-tenant panorama dashboard."""

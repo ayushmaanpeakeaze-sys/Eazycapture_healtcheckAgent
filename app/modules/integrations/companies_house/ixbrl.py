@@ -18,7 +18,7 @@ import re
 import xml.etree.ElementTree as ET
 from decimal import Decimal, InvalidOperation
 
-logger = logging.getLogger("hcpoc.companies_house.ixbrl")
+logger = logging.getLogger("eazycapture.companies_house.ixbrl")
 
 # XBRL concept local-names that represent "Net Assets / (Liabilities)".
 # Order matters only for the preference rule below — the canonical

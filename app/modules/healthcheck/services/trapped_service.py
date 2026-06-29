@@ -23,7 +23,7 @@ from app.modules.healthcheck.schemas import (
 )
 from app.modules.healthcheck.xero_links import xero_deep_link
 
-logger = logging.getLogger("hcpoc.trapped")
+logger = logging.getLogger("eazycapture.trapped")
 
 _AI_KEY_PREFIX = "health_check_ai"
 
@@ -198,7 +198,7 @@ def _build_item(
     """ORM row + Redis AI → flat response item.
 
     ``user_id`` / ``target_ledger`` live inside the ``result`` JSONB
-    (the task stores them there in Day 3); we project them up so the
+    (the audit task stores them there); we project them up so the
     frontend sees a single flat object.
     """
     result = row.result or {}

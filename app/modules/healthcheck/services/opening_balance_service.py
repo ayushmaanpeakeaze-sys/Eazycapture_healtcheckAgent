@@ -36,7 +36,7 @@ from app.services.healthcheck.opening_balance import (
     find_late_transactions,
 )
 
-logger = logging.getLogger("hcpoc.opening_balance_service")
+logger = logging.getLogger("eazycapture.opening_balance_service")
 
 
 def _dec(value: Any) -> Optional[Decimal]:

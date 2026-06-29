@@ -19,7 +19,7 @@ from typing import Any, Optional
 from app.modules.integrations.companies_house.client import CompaniesHouseClient
 from app.modules.integrations.companies_house.ixbrl import extract_net_assets
 
-logger = logging.getLogger("hcpoc.companies_house.service")
+logger = logging.getLogger("eazycapture.companies_house.service")
 
 
 @dataclass(frozen=True)

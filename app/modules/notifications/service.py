@@ -24,7 +24,7 @@ from app.modules.notifications.channels.base import (
 from app.modules.notifications.channels.console import ConsoleChannel
 from app.modules.notifications.channels.email import SmtpEmailChannel
 
-logger = logging.getLogger("hcpoc.notifications")
+logger = logging.getLogger("eazycapture.notifications")
 
 
 class NotificationService:

@@ -4,7 +4,7 @@ Internal EazyCapture data, NOT Xero: an accountant's notes and uploaded files
 (bank statements, reconciliation spreadsheets) against ONE bank account at ONE
 period end. Provides the "Add Note" + "Upload Supporting Documentation" workflow.
 
-File bytes are stored in the DB (POC-simple; statements are small). Swap for
+File bytes are stored in the DB (statements are small). Swap for
 object storage when volumes grow.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.healthcheck.models import BankDocument, BankNote
 
-logger = logging.getLogger("hcpoc.bank_annotations")
+logger = logging.getLogger("eazycapture.bank_annotations")
 
 # Reject uploads larger than this (DB-blob storage; keep it sane).
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB

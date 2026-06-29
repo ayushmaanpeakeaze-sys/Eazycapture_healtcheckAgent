@@ -3,7 +3,7 @@ Redis key is missing/empty and re-runs the per-row enrichment one
 at a time (with a small inter-call sleep) so Groq's TPM cap doesn't
 clip the batch again.
 
-Why this exists: the Day 3 fire-and-forget enrich call processes all
+Why this exists: the audit's fire-and-forget enrich call processes all
 trapped rows in parallel and the free-tier Groq budget sometimes
 drops a few. The dashboard ends up with 12/15 rows enriched. Running
 this sweep tops it back up to 15/15 without re-running the audit.
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.healthcheck.models import HealthCheckResult
 
-logger = logging.getLogger("hcpoc.reenrich")
+logger = logging.getLogger("eazycapture.reenrich")
 
 _AI_KEY_PREFIX = "health_check_ai"
 

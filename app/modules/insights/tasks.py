@@ -24,7 +24,7 @@ from app.modules.healthcheck.services.panorama_service import _compute_health_sc
 from app.modules.insights.models import ClientInsightSnapshot
 from app.services.insights.snapshot import compute_company_snapshot
 
-logger = logging.getLogger("hcpoc.insights.tasks")
+logger = logging.getLogger("eazycapture.insights.tasks")
 
 
 def _bookkeeping_health(db, company_id: UUID) -> dict:

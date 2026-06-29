@@ -18,7 +18,7 @@ import httpx
 
 from app.core.config import settings
 
-logger = logging.getLogger("hcpoc.nango.client")
+logger = logging.getLogger("eazycapture.nango.client")
 
 # Tag used on warnings so a grep for ``[Nango]`` shows every Nango
 # call site in the logs.

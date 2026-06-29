@@ -40,7 +40,7 @@ from app.modules.healthcheck.schemas import (
     HealthSummaryResponse,
 )
 
-logger = logging.getLogger("hcpoc.panorama")
+logger = logging.getLogger("eazycapture.panorama")
 
 # Resolution / dismissal flags inside the ``result`` JSONB.
 _FLAG_RESOLVED = "resolved"

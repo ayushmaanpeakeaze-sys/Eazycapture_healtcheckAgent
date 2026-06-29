@@ -20,7 +20,7 @@ from app.modules.healthcheck.schemas import (
 )
 from app.modules.integrations.service import IntegrationService
 
-logger = logging.getLogger("hcpoc.attachment_service")
+logger = logging.getLogger("eazycapture.attachment_service")
 
 
 def _extract_has_attachments(doc: object) -> bool:

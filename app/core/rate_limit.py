@@ -14,7 +14,7 @@ import logging
 from app.core.config import settings
 from app.core.redis_client import get_redis
 
-logger = logging.getLogger("hcpoc.rate_limit")
+logger = logging.getLogger("eazycapture.rate_limit")
 
 _PREFIX = "login_fail:"
 

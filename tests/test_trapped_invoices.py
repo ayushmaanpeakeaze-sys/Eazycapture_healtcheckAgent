@@ -1,4 +1,4 @@
-"""Day 4 — trapped-invoices feed tests.
+"""Trapped-invoices feed tests.
 
 Each test creates its own scratch company so the fixtures don't fight
 the live Demo Co data from the audit dispatch test. Uses

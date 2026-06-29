@@ -22,13 +22,13 @@ class Settings:
     HEALTHCHECK_AI_TTL_SECONDS: int
     CORS_ALLOWED_ORIGINS: tuple[str, ...]
 
-    # --- POC additions (DB-backed /api/v1/health/* routes) ---
+    # --- DB-backed /api/v1/health/* routes ---
     DATABASE_URL: str
     CELERY_BROKER_URL: str
     CELERY_RESULT_BACKEND: str
 
     # AI FastAPI endpoints — these point at this same process by default
-    # (the rules + LLM service we already expose). Override if the POC
+    # (the rules + LLM service we already expose). Override if the engine
     # ever runs in a separate container.
     HEALTHCHECK_AI_BASE_URL: str
     HEALTHCHECK_AI_BATCH_URL: str
@@ -56,7 +56,7 @@ class Settings:
     # (see assert_safe_for_environment below).
     APP_ENV: str
 
-    # Auth — empty = POC mode (no JWT check). Set AUTH_DISABLED=true to
+    # Auth — empty = demo mode (no JWT check). Set AUTH_DISABLED=true to
     # force the open demo path even if a JWT secret is present.
     AUTH_DISABLED: bool
     JWT_SECRET: str
@@ -144,7 +144,7 @@ def _load() -> Settings:
         LLM_CHECKS_ENABLED=_as_bool(os.environ.get("LLM_CHECKS_ENABLED", "true")),
         HEALTHCHECK_AI_TTL_SECONDS=int(os.environ.get("HEALTHCHECK_AI_TTL_SECONDS", "2592000")),
         CORS_ALLOWED_ORIGINS=_as_origins(os.environ.get("CORS_ALLOWED_ORIGINS", "")),
-        # --- POC ---
+        # --- Database / Celery / Redis ---
         DATABASE_URL=_normalize_async_db_url(os.environ.get(
             "DATABASE_URL",
             "postgresql+asyncpg://hcpoc:hcpoc@127.0.0.1:5434/healthcheck_poc",
@@ -179,7 +179,7 @@ def _load() -> Settings:
         NANGO_BASE_URL=os.environ.get("NANGO_BASE_URL", "https://api.nango.dev"),
         NANGO_SECRET_KEY=os.environ.get("NANGO_SECRET_KEY", ""),
         NANGO_WEBHOOK_SECRET=os.environ.get("NANGO_WEBHOOK_SECRET", ""),
-        NANGO_USER_ID=os.environ.get("NANGO_USER_ID", "poc-demo-user"),
+        NANGO_USER_ID=os.environ.get("NANGO_USER_ID", "demo-user"),
         NANGO_XERO_INTEGRATION_ID=os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero"),
         MAX_NANGO_PAGES=int(os.environ.get("MAX_NANGO_PAGES", "10")),
         AUDIT_SOURCE=os.environ.get("AUDIT_SOURCE", "proxy").strip().lower(),

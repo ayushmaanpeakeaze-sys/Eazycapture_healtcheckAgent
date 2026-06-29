@@ -27,7 +27,7 @@ from app.services.healthcheck.contact_checks import (
     missing_contact_defaults,
 )
 
-logger = logging.getLogger("hcpoc.contact_defaults")
+logger = logging.getLogger("eazycapture.contact_defaults")
 
 _CONTACT_DEFAULTS_RULE = "contact_defaults"
 

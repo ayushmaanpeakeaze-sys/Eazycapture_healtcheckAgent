@@ -1,4 +1,4 @@
-"""Day 7 — per-company health summary test.
+"""Per-company health summary test.
 
 Asserts that ``top_issues`` groups trapped rows by their primary
 rule id, returns the most common ones first, and exposes a

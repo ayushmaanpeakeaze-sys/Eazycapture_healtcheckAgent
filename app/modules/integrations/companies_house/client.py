@@ -19,7 +19,7 @@ import httpx
 
 from app.core.config import settings
 
-logger = logging.getLogger("hcpoc.companies_house.client")
+logger = logging.getLogger("eazycapture.companies_house.client")
 
 # iXBRL is served as XHTML; this is the content type the Document API uses.
 IXBRL_ACCEPT = "application/xhtml+xml"

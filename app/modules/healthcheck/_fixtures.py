@@ -1,7 +1,6 @@
 """Hardcoded chart of accounts + tax rates used by the audit task.
 
-Day 6 swaps these for live pulls via Nango. Matches the EazyCapture
-standard chart of accounts used across all connected Xero orgs.
+Matches the standard chart of accounts used across connected Xero orgs.
 """
 from __future__ import annotations
 

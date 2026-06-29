@@ -1,4 +1,4 @@
-"""Day 7 — companies panorama tests.
+"""Companies panorama tests.
 
 Builds two scratch companies + matching ``audit_batch`` and
 ``health_check_result`` rows, then asserts:

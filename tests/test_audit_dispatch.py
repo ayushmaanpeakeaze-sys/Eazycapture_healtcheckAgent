@@ -1,4 +1,4 @@
-"""Day 3 — audit dispatch end-state test.
+"""Audit dispatch end-state test.
 
 We don't run the full Celery pipeline here (that needs a live worker
 + rules service); we just verify the dispatch endpoint creates the

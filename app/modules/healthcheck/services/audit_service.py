@@ -25,7 +25,7 @@ from app.modules.healthcheck.schemas import (
     DispatchAuditResponse,
 )
 
-logger = logging.getLogger("hcpoc.audit")
+logger = logging.getLogger("eazycapture.audit")
 
 BATCH_HASH_PREFIX = "xero_historical_audit_batch"
 META_FIELD = "_meta"

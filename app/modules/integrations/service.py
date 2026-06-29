@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from app.modules.integrations.nango.service import NangoService
 
-logger = logging.getLogger("hcpoc.integrations.service")
+logger = logging.getLogger("eazycapture.integrations.service")
 
 
 def _attachment_base(document_type: Optional[str]) -> str:

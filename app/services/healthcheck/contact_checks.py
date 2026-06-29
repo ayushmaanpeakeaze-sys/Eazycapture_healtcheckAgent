@@ -24,7 +24,7 @@ from rapidfuzz import fuzz
 
 from app.services.healthcheck.audit_settings import AuditSettings, DEFAULT_SETTINGS
 
-logger = logging.getLogger("hcpoc.contact_checks")
+logger = logging.getLogger("eazycapture.contact_checks")
 
 # (inactive window is per-client: ``settings.inactive_days``, default 180)
 

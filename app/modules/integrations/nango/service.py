@@ -16,7 +16,7 @@ from typing import Any, Optional
 from app.core.config import settings
 from app.modules.integrations.nango.client import NangoClient
 
-logger = logging.getLogger("hcpoc.nango.service")
+logger = logging.getLogger("eazycapture.nango.service")
 
 _LOG_TAG = "[SuHe][Nango]"
 

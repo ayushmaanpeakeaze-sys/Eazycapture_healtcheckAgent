@@ -16,7 +16,7 @@ from app.modules.notifications.channels.base import (
     Recipient,
 )
 
-logger = logging.getLogger("hcpoc.notifications.console")
+logger = logging.getLogger("eazycapture.notifications.console")
 
 
 class ConsoleChannel(NotificationChannel):

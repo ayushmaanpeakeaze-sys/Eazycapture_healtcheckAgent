@@ -1,4 +1,4 @@
-"""Day 7 — optional JWT auth tests.
+"""Optional JWT auth tests.
 
 We don't want to leave ``JWT_SECRET`` permanently set in the test
 process (every other test would need a token). Each test patches

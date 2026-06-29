@@ -1,15 +1,14 @@
 """Resolve + dismiss orchestration for trapped rows.
 
-This is the single seam where Xero writes happen. Day 5 ships a STUB —
-the would-be PUT is logged and a synthetic response is returned. Day
-6 swaps ``_call_xero_stub`` for a real ``IntegrationService.update_xero_invoice``
-call without touching the orchestration above it.
+This is the single seam where Xero writes happen: ``_call_xero`` pushes the
+update through Nango when the org is connected, otherwise it logs the intent
+and returns a stub response so the row still resolves end-to-end.
 
 Allow-lists for ``field_updates``:
 
 * Header fields go in one PUT body.
-* Line-item fields trigger a GET-modify-PUT cycle in the real Day 6
-  implementation. For Day 5 we just record the intent.
+* Line-item fields trigger a GET-modify-PUT cycle when connected; otherwise
+  the intent is recorded.
 
 Anything outside both allow-lists is dropped into ``skipped_fields``
 so the frontend can show "we ignored these" without a 400.
@@ -39,7 +38,7 @@ from app.modules.healthcheck.schemas import (
 from app.modules.healthcheck.xero_links import xero_deep_link
 from app.modules.integrations.service import IntegrationService
 
-logger = logging.getLogger("hcpoc.resolve")
+logger = logging.getLogger("eazycapture.resolve")
 
 ALLOWED_UPDATE_FIELDS: frozenset[str] = frozenset({
     "InvoiceNumber", "Reference", "Date", "DueDate",
@@ -51,7 +50,7 @@ ALLOWED_LINE_ITEM_FIELDS: frozenset[str] = frozenset({
 
 
 class ResolveService:
-    """Marks rows resolved / dismissed. Day 6 will plug Nango in here."""
+    """Marks rows resolved / dismissed and writes the change back to Xero."""
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
@@ -82,7 +81,7 @@ class ResolveService:
         ai_applied: bool = False,
         ai_fix_strategy: Optional[str] = None,
     ) -> ResolveResponse:
-        """Apply field updates (stub for Day 5) + mark row resolved.
+        """Apply field updates (pushed to Xero when connected) + mark row resolved.
 
         Always returns a ``ResolveResponse``; sets ``error_code`` when
         the request is rejected so the route can map it to a 4xx.
@@ -501,7 +500,7 @@ class ResolveService:
         )
 
     # ------------------------------------------------------------------
-    # Xero stub (Day 6 swaps for IntegrationService.update_xero_invoice)
+    # Xero write — pushes via Nango when connected, else a stub response
     # ------------------------------------------------------------------
 
     async def _call_xero(
