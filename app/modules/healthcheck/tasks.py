@@ -907,6 +907,15 @@ def _persist_trapped(
             # (vendor_name also works, but the id survives a rename).
             "contact_id": (transaction.get("contact_id") or "").strip() or None,
             "invoice_number": (transaction.get("invoice_number") or "").strip() or None,
+            # Human identifier that is NEVER the Xero GUID: the invoice number for
+            # sales invoices, the reference for bills (which have no invoice
+            # number). The UI shows this — labelled "Reference" for bills —
+            # instead of falling back to the transaction id.
+            "display_number": (
+                (transaction.get("invoice_number") or "").strip()
+                or (transaction.get("reference") or "").strip()
+                or None
+            ),
             "amount": str(transaction.get("amount") or ""),
             "currency_code": (transaction.get("currency_code") or "GBP").strip(),
             "invoice_date": transaction.get("date") or None,        # Invoice Date column
@@ -1524,7 +1533,10 @@ def historical_audit_task(
         # and whenever LLM checks are disabled: with no AI provider configured
         # the pre-warm would only loop on connection errors. The deterministic
         # flags are already persisted; re-enable via LLM_CHECKS_ENABLED.
-        if trapped_rows and not dup_only and settings.LLM_CHECKS_ENABLED:
+        if (
+            trapped_rows and not dup_only
+            and settings.LLM_CHECKS_ENABLED and settings.GROQ_API_KEY
+        ):
             enrich_payloads = [
                 {
                     "document_id": row.get("transaction_id", ""),
@@ -1594,12 +1606,15 @@ def prewarm_insights_task(rows_payload: list[dict]) -> dict:
     # No AI provider when LLM checks are disabled — skip rather than loop on
     # connection errors. The deterministic flags are already persisted, so the
     # audit is complete without enrichment.
-    if not _settings.LLM_CHECKS_ENABLED:
+    # Skip when LLM checks are off OR no Groq key is configured. The missing-key
+    # guard matters most: without a key the enrichment can only loop on connection
+    # errors and hog the worker, which starves syncs — so never start it.
+    if not (_settings.LLM_CHECKS_ENABLED and _settings.GROQ_API_KEY):
         logger.info(
-            "[SuHe][Prewarm] LLM checks disabled — skipping enrichment for %d row(s)",
-            len(rows_payload),
+            "[SuHe][Prewarm] LLM unavailable (disabled or no GROQ_API_KEY) — "
+            "skipping enrichment for %d row(s)", len(rows_payload),
         )
-        return {"cached": 0, "skipped": len(rows_payload), "reason": "llm_disabled"}
+        return {"cached": 0, "skipped": len(rows_payload), "reason": "llm_unavailable"}
 
     import json as _json
     import redis as _redis_sync
@@ -1753,13 +1768,13 @@ def reenrich_missing_task(
     ``{"row_id": ..., "document_id": ..., "row": {transaction_id,
     rule_ids, messages, transaction, flagged_items}}``.
     """
-    # No AI provider when LLM checks are disabled — skip rather than fire a
-    # burst of enrich-row calls that would only fail. Keeps every "refresh" /
-    # re-enrich path free of Groq when LLM_CHECKS_ENABLED is off.
-    if not settings.LLM_CHECKS_ENABLED:
+    # No AI provider when LLM checks are off OR no Groq key is set — skip rather
+    # than fire a burst of enrich-row calls that would only fail and tie up the
+    # worker. Keeps every refresh / re-enrich path free of Groq.
+    if not (settings.LLM_CHECKS_ENABLED and settings.GROQ_API_KEY):
         logger.info(
-            "[SuHe][Reenrich] LLM checks disabled — skipping re-enrichment for "
-            "%d row(s)", len(rows_payload),
+            "[SuHe][Reenrich] LLM unavailable (disabled or no GROQ_API_KEY) — "
+            "skipping re-enrichment for %d row(s)", len(rows_payload),
         )
         return {
             "processed": 0, "enriched": 0, "failed": 0,
