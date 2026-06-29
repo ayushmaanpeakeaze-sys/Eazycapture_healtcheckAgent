@@ -79,10 +79,26 @@ class Settings:
     SMTP_FROM: str
     SMTP_STARTTLS: bool   # True for port 587 (default), False for SSL
     SMTP_SSL: bool        # True for implicit SSL on port 465
-    # Resend (HTTP email API) — preferred when set, since it sends over HTTPS
-    # and works where outbound SMTP is blocked (e.g. Railway).
+    # Resend (HTTP email API) — sends over HTTPS, works where outbound SMTP is
+    # blocked (e.g. Railway). Fallback once Mailgun is the primary provider.
     RESEND_API_KEY: str
     RESEND_FROM: str
+    # Mailgun (HTTP email API) — the firm's PRIMARY/default email provider for
+    # invites + signup OTPs. Sends over HTTPS and is auto-picked first whenever
+    # configured. The Messages endpoint authenticates with the (sending) API key
+    # over HTTP Basic ('api:<key>'); region is set by the base URL (EU vs US).
+    # All values come from APP_MAILGUN_* env vars.
+    MAILGUN_API_KEY: str
+    MAILGUN_SENDING_API_KEY: str
+    MAILGUN_SENDING_DOMAIN: str
+    MAILGUN_API_BASE_URL: str
+    MAILGUN_FROM: str  # blank → "<APP_NAME> <noreply@<sending-domain>>"
+    # HMAC key Mailgun signs delivery/bounce webhooks with (verified in webhooks.py).
+    MAILGUN_WEBHOOK_SIGNING_KEY: str
+    # Optional: a probe recipient for a send self-test, and the inbound
+    # (receiving) domain for future reply handling.
+    MAILGUN_PROBE_TO: str
+    MAILGUN_INBOUND_DOMAIN: str
     # Used to build the accept-invite link inside the email — point this at
     # the frontend origin + route that handles invite acceptance.
     APP_NAME: str
@@ -210,6 +226,18 @@ def _load() -> Settings:
         SMTP_SSL=_as_bool(os.environ.get("SMTP_SSL", "false")),
         RESEND_API_KEY=os.environ.get("RESEND_API_KEY", ""),
         RESEND_FROM=os.environ.get("RESEND_FROM", "onboarding@resend.dev"),
+        MAILGUN_API_KEY=os.environ.get("APP_MAILGUN_API_KEY", ""),
+        MAILGUN_SENDING_API_KEY=os.environ.get("APP_MAILGUN_SENDING_API_KEY", ""),
+        MAILGUN_SENDING_DOMAIN=os.environ.get("APP_MAILGUN_SENDING_DOMAIN", ""),
+        MAILGUN_API_BASE_URL=os.environ.get(
+            "APP_MAILGUN_API_BASE_URL", "https://api.mailgun.net"
+        ),
+        MAILGUN_FROM=os.environ.get("APP_MAILGUN_FROM", ""),
+        MAILGUN_WEBHOOK_SIGNING_KEY=os.environ.get(
+            "APP_MAILGUN_WEBHOOK_SIGNING_KEY", ""
+        ),
+        MAILGUN_PROBE_TO=os.environ.get("APP_MAILGUN_PROBE_TO", ""),
+        MAILGUN_INBOUND_DOMAIN=os.environ.get("APP_MAILGUN_INBOUND_DOMAIN", ""),
         APP_NAME=os.environ.get("APP_NAME", "EazyCapture"),
         APP_BASE_URL=os.environ.get("APP_BASE_URL", "http://localhost:5173"),
         ACCEPT_INVITE_PATH=os.environ.get("ACCEPT_INVITE_PATH", "/accept-invite"),

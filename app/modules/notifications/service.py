@@ -23,6 +23,7 @@ from app.modules.notifications.channels.base import (
 )
 from app.modules.notifications.channels.console import ConsoleChannel
 from app.modules.notifications.channels.email import SmtpEmailChannel
+from app.modules.notifications.channels.mailgun import MailgunEmailChannel
 from app.modules.notifications.channels.resend import ResendEmailChannel
 
 logger = logging.getLogger("eazycapture.notifications")
@@ -30,6 +31,7 @@ logger = logging.getLogger("eazycapture.notifications")
 
 class NotificationService:
     def __init__(self) -> None:
+        self._mailgun = MailgunEmailChannel()
         self._resend = ResendEmailChannel()
         self._email = SmtpEmailChannel()
         self._console = ConsoleChannel()
@@ -38,7 +40,9 @@ class NotificationService:
     def _build_channels(self) -> dict[str, NotificationChannel]:
         # Register every available channel here. Order is irrelevant —
         # routing is by name / capability, not list position.
-        channels: list[NotificationChannel] = [self._resend, self._email, self._console]
+        channels: list[NotificationChannel] = [
+            self._mailgun, self._resend, self._email, self._console,
+        ]
         return {c.name: c for c in channels}
 
     def channel(self, name: str) -> Optional[NotificationChannel]:
@@ -72,9 +76,12 @@ class NotificationService:
     async def _auto_pick(
         self, recipient: Recipient, message: Message,
     ) -> DeliveryResult:
-        """Pick the best configured channel for the recipient. Prefer Resend
-        (HTTPS — works where outbound SMTP is blocked, e.g. Railway), then SMTP,
-        else the console. Extend here when phone channels (WhatsApp/SMS) land."""
+        """Pick the best configured channel for the recipient. Prefer Mailgun
+        (the firm's primary provider), then Resend, then SMTP, else the console.
+        Mailgun/Resend send over HTTPS so they work where outbound SMTP is
+        blocked (e.g. Railway). Extend here when phone channels (WhatsApp/SMS) land."""
+        if self._mailgun.can_handle(recipient):
+            return await self._mailgun.send(recipient, message)
         if self._resend.can_handle(recipient):
             return await self._resend.send(recipient, message)
         if self._email.can_handle(recipient):

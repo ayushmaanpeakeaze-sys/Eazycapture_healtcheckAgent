@@ -5,15 +5,19 @@ here when a message is delivered, bounces, or is marked as spam. We
 normalize the payload, then update notification_log + the affected user's
 ``email_status`` so the team list can flag a bad address.
 
-Provider-agnostic: understands Resend, SendGrid and a generic shape. Add a
-new provider by extending :func:`_extract_events` — nothing else changes.
+Provider-agnostic: understands Mailgun, Resend, SendGrid and a generic shape.
+Add a new provider by extending :func:`_extract_events` — nothing else changes.
 
-Auth: a shared secret (``EMAIL_WEBHOOK_SECRET``) via ``X-Webhook-Secret``
-header or ``?secret=`` query. Empty secret → accept-with-warning (dev),
-mirroring the Nango webhook so local testing isn't blocked.
+Auth: Mailgun signs its payload with an HMAC (``APP_MAILGUN_WEBHOOK_SIGNING_KEY``)
+which we verify directly; every other provider uses a shared secret
+(``EMAIL_WEBHOOK_SECRET``) via ``X-Webhook-Secret`` header or ``?secret=`` query.
+An unset key/secret → accept-with-warning (dev), mirroring the Nango webhook so
+local testing isn't blocked.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 from typing import Any, Optional
 
@@ -37,19 +41,8 @@ async def email_webhook(
     secret: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
-    # --- auth ---
-    expected = settings.EMAIL_WEBHOOK_SECRET
-    if expected:
-        if (x_webhook_secret or secret) != expected:
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Invalid webhook secret."},
-            )
-    else:
-        logger.warning(
-            "EMAIL_WEBHOOK_SECRET unset — accepting unverified email webhook",
-        )
-
+    # Parse first: Mailgun authenticates with an HMAC signature INSIDE the body,
+    # not a shared header, so we need the payload before we can authorise it.
     try:
         payload = await request.json()
     except Exception:
@@ -57,6 +50,33 @@ async def email_webhook(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "Body is not valid JSON."},
         )
+
+    # --- auth ---
+    if _is_mailgun(payload):
+        signing_key = settings.MAILGUN_WEBHOOK_SIGNING_KEY
+        if signing_key:
+            if not _verify_mailgun_signature(payload, signing_key):
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Invalid Mailgun signature."},
+                )
+        else:
+            logger.warning(
+                "APP_MAILGUN_WEBHOOK_SIGNING_KEY unset — accepting unverified "
+                "Mailgun webhook",
+            )
+    else:
+        expected = settings.EMAIL_WEBHOOK_SECRET
+        if expected:
+            if (x_webhook_secret or secret) != expected:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Invalid webhook secret."},
+                )
+        else:
+            logger.warning(
+                "EMAIL_WEBHOOK_SECRET unset — accepting unverified email webhook",
+            )
 
     events = _extract_events(payload)
     applied = 0
@@ -90,6 +110,11 @@ def _extract_events(payload: Any) -> list[dict[str, Optional[str]]]:
     if not isinstance(payload, dict):
         return []
 
+    # Mailgun: {"signature": {...}, "event-data": {"event": "delivered", ...}}
+    if isinstance(payload.get("event-data"), dict):
+        one = _from_mailgun(payload)
+        return [one] if (one.get("email") or one.get("message_id")) else []
+
     # Resend / generic single-event shape: {"type": "email.bounced", "data": {...}}
     if "type" in payload and "data" in payload and isinstance(payload["data"], dict):
         return [_from_resend(payload)]
@@ -105,6 +130,44 @@ def _extract_events(payload: Any) -> list[dict[str, Optional[str]]]:
     # Generic single: {"email": "...", "event": "...", "message_id": "..."}
     one = _from_generic(payload)
     return [one] if (one.get("email") or one.get("message_id")) else []
+
+
+def _is_mailgun(payload: Any) -> bool:
+    """Mailgun posts ``{"signature": {...}, "event-data": {...}}``."""
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("signature"), dict)
+        and isinstance(payload.get("event-data"), dict)
+    )
+
+
+def _verify_mailgun_signature(payload: dict, signing_key: str) -> bool:
+    """Verify Mailgun's HMAC: ``hexdigest(HMAC-SHA256(key, timestamp + token))``
+    must equal the provided signature. Constant-time compare."""
+    sig = payload.get("signature") or {}
+    timestamp = str(sig.get("timestamp", ""))
+    token = str(sig.get("token", ""))
+    provided = str(sig.get("signature", ""))
+    if not (timestamp and token and provided):
+        return False
+    expected = hmac.new(
+        signing_key.encode("utf-8"),
+        msg=f"{timestamp}{token}".encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, provided)
+
+
+def _from_mailgun(payload: dict) -> dict[str, Optional[str]]:
+    ev = payload.get("event-data") or {}
+    message = ev.get("message") or {}
+    headers = message.get("headers") or {}
+    return {
+        "email": ev.get("recipient"),
+        "event": str(ev.get("event", "")),
+        "message_id": headers.get("message-id") or ev.get("id"),
+        "provider": "mailgun",
+    }
 
 
 def _from_sendgrid(item: dict) -> dict[str, Optional[str]]:
