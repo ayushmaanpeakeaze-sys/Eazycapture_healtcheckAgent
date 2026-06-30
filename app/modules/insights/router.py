@@ -26,12 +26,14 @@ from app.core.redis_client import get_redis
 from app.modules.healthcheck.models import Company
 from app.modules.insights.models import ClientInsightSnapshot
 from app.modules.insights.schemas import (
+    CashHealthSettingsModel,
     FirmClientRow,
     FirmSummaryResponse,
     RefreshResponse,
     SalesTargetConfigModel,
     SnapshotResponse,
 )
+from app.services.insights.cash_health.config import parse_config as parse_cash_health_config
 from app.services.insights.sales_tracker.config import parse_config
 from app.modules.insights.tasks import refresh_company_snapshot
 
@@ -216,3 +218,52 @@ async def set_sales_target(
     company.audit_config = merged  # reassign so SQLAlchemy flags the JSONB dirty
     await db.commit()
     return merged["sales_target"]
+
+
+@router.get(
+    "/{company_id}/cash-health-settings/",
+    response_model=CashHealthSettingsModel,
+    summary="Get this client's Cash Health Check settings.",
+)
+async def get_cash_health_settings(
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    company = await db.get(Company, company_id)
+    cfg = ((company.audit_config if company else None) or {}).get("cash_health") or {}
+    return {
+        "included": cfg.get("included", {}),
+        "overrides": cfg.get("overrides", {}),
+        "account_overrides": cfg.get("account_overrides", {}),
+        "disregarded_banks": cfg.get("disregarded_banks", []),
+    }
+
+
+@router.put(
+    "/{company_id}/cash-health-settings/",
+    response_model=CashHealthSettingsModel,
+    summary="Set this client's Cash Health Check settings — applied on the next refresh.",
+)
+async def set_cash_health_settings(
+    payload: CashHealthSettingsModel,
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    # Sanitise through the same parser the calculator uses, then store under the
+    # company's audit_config JSONB (the shared settings bucket).
+    cfg = parse_cash_health_config(payload.model_dump())
+    company = await db.get(Company, company_id)
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="company not found",
+        )
+    merged = dict(company.audit_config or {})
+    merged["cash_health"] = {
+        "included": cfg.included,
+        "overrides": cfg.overrides,
+        "account_overrides": cfg.account_overrides,
+        "disregarded_banks": sorted(cfg.disregarded_banks),
+    }
+    company.audit_config = merged  # reassign so SQLAlchemy flags the JSONB dirty
+    await db.commit()
+    return merged["cash_health"]

@@ -369,12 +369,15 @@ class IntegrationService:
         connection_id: str,
         tenant_id: str,
         as_at_date: Optional[str] = None,
+        periods: Optional[int] = None,
+        timeframe: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Xero BalanceSheet report — powers Dividend, Working Capital,
         and net-asset Valuation insights. ``as_at_date`` (YYYY-MM-DD) pins it
-        to a period end for Opening Balance Differences."""
+        to a period end for Opening Balance Differences; ``periods``+``timeframe``
+        return comparative columns for the Cash Health Check's recent-movements."""
         return await self._nango.fetch_xero_balance_sheet(
-            connection_id, tenant_id, as_at_date,
+            connection_id, tenant_id, as_at_date, periods=periods, timeframe=timeframe,
         )
 
     async def fetch_trial_balance(

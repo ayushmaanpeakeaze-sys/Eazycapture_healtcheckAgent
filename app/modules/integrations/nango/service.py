@@ -467,18 +467,28 @@ class NangoService:
         connection_id: str,
         tenant_id: str,
         as_at_date: Optional[str] = None,
+        periods: Optional[int] = None,
+        timeframe: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Xero BalanceSheet report. ``as_at_date`` (YYYY-MM-DD) pins the report
         to a period end — used by Opening Balance Differences to read Net Assets
-        at each Companies-House filing date. Returns the single report dict from
+        at each Companies-House filing date. ``periods``+``timeframe`` (e.g. 4 +
+        ``MONTH``) make Xero return comparative period-end columns — used by the
+        Cash Health Check's recent-movements. Returns the single report dict from
         the ``Reports`` array, or None on failure."""
-        params = {"date": as_at_date} if as_at_date else None
+        params: dict[str, str] = {}
+        if as_at_date:
+            params["date"] = as_at_date
+        if periods is not None:
+            params["periods"] = str(periods)
+        if timeframe:
+            params["timeframe"] = timeframe
         body = await self._client.proxy_get(
             connection_id=connection_id,
             provider_config_key=self._provider_config_key,
             endpoint="api.xro/2.0/Reports/BalanceSheet",
             tenant_id=tenant_id,
-            params=params,
+            params=params or None,
         )
         if not isinstance(body, dict):
             return None

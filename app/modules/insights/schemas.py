@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --- Profitability ---------------------------------------------------------
@@ -158,6 +158,20 @@ class SalesTargetConfigModel(BaseModel):
     basis: str = "average_3"
     adjustment_pct: float = 0.0       # +/- nudge applied to the derived target
     manual_value: Optional[float] = None  # only for basis == "manual"
+
+
+class CashHealthSettingsModel(BaseModel):
+    """Cash Health Check settings (the Settings cog). Categories:
+    suppliers | net_wages | paye_nic | pension | credit_cards | vat |
+    corporation_tax | loans_other."""
+    # category -> include this outgoing in the totals (default: all included)
+    included: dict[str, bool] = Field(default_factory=dict)
+    # category -> manual override value (replaces the auto Xero figure)
+    overrides: dict[str, float] = Field(default_factory=dict)
+    # account code -> category (re-assign a nominal account)
+    account_overrides: dict[str, str] = Field(default_factory=dict)
+    # bank account codes to leave OUT of the current-cash figure
+    disregarded_banks: list[str] = Field(default_factory=list)
 
 
 class FirmClientRow(BaseModel):

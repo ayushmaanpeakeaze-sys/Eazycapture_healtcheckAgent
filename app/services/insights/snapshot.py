@@ -13,10 +13,14 @@ from typing import Any, Optional
 from app.modules.integrations.service import IntegrationService
 from app.services.insights.balance_sheet import compute_financial_position
 from app.services.insights.bank import compute_bank_balance, compute_bank_reconciliation
+from app.services.insights.cash_health import compute_cash_health
 from app.services.insights.corp_tax import estimate_corporation_tax
 from app.services.insights.directors_loans import find_director_loans
 from app.services.insights.profitability import compute_profitability
 from app.services.insights.sales_tracker import compute_sales_tracker
+
+# how many trailing months of bank balance the Cash Health Check movements show
+_MOVEMENT_PERIODS = 4
 
 
 async def compute_company_snapshot(
@@ -24,14 +28,20 @@ async def compute_company_snapshot(
     tenant_id: str,
     periods: int = 11,
     sales_target_config: Optional[dict[str, Any]] = None,
+    cash_health_config: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     integ = IntegrationService()
-    pnl, bs, tb, bank_txns, bank_summary = await asyncio.gather(
+    pnl, bs, tb, bank_txns, bank_summary, coa, bs_periods = await asyncio.gather(
         integ.fetch_profit_and_loss(connection_id, tenant_id, periods=periods),
         integ.fetch_balance_sheet(connection_id, tenant_id),
         integ.fetch_trial_balance(connection_id, tenant_id),
         integ.fetch_all_bank_transactions(connection_id, tenant_id),
         integ.fetch_bank_summary(connection_id, tenant_id),
+        integ.fetch_chart_of_accounts(connection_id, tenant_id),
+        integ.fetch_balance_sheet(
+            connection_id, tenant_id,
+            periods=_MOVEMENT_PERIODS, timeframe="MONTH",
+        ),
     )
 
     # A failed report fetch (Xero connection needs re-auth, transient proxy
@@ -52,6 +62,13 @@ async def compute_company_snapshot(
     dla = find_director_loans(tb)
     bank = compute_bank_reconciliation(bank_txns)
     bank_balance = compute_bank_balance(tb, bank_summary, bank_txns)
+    cash_health = compute_cash_health(
+        chart_of_accounts=coa,
+        trial_balance=tb,
+        balance_sheet_periods=bs_periods,
+        corp_tax_estimate=corp_tax["tax_estimate"],
+        config_raw=cash_health_config,
+    )
 
     return {
         # summary (firm rollup)
@@ -77,5 +94,8 @@ async def compute_company_snapshot(
             "directors_loans": dla,
             "bank_reconciliation": bank,
             "bank_balance": bank_balance,
+            # the full Cash Health Check (distinct from financial_position's
+            # balance-sheet "cash_health" liquidity ratio)
+            "cash_health_check": cash_health,
         },
     }

@@ -89,6 +89,7 @@ def _do_refresh_company_snapshot(company_id: str) -> dict:
                 compute_company_snapshot(
                     company.nango_connection_id, company.xero_tenant_id,
                     sales_target_config=(company.audit_config or {}).get("sales_target"),
+                    cash_health_config=(company.audit_config or {}).get("cash_health"),
                 )
             )
             # 9th KPI — Bookkeeping Health from stored audit data (DB, not Xero).
