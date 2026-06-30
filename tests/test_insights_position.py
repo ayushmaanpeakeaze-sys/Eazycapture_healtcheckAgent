@@ -78,16 +78,17 @@ def _pnl():
     ]}
 
 
-def test_sales_tracker_auto_target():
+def test_sales_tracker_default_average():
     d = compute_sales_tracker(_pnl())
     assert d["actual"] == [1000.0, 2000.0, 0.0]
-    assert d["target"] == 1500.0          # avg of active (non-zero) months
-    assert d["target_basis"].startswith("auto")
-    assert d["rows"][1]["met_target"] is True   # 2000 >= 1500
+    assert d["target_basis"] == "average_3"
+    # default avg_3: last month's target = avg of the 2 prior months = 1500
+    assert d["target"] == 1500.0
+    assert d["rows"][1]["met_target"] is True   # 2000 >= 1000 (prev-avg target)
 
 
 def test_sales_tracker_manual_target():
-    d = compute_sales_tracker(_pnl(), target=2500.0)
+    d = compute_sales_tracker(_pnl(), config_raw={"basis": "manual", "manual_value": 2500.0})
     assert d["target"] == 2500.0
     assert d["target_basis"] == "manual"
-    assert d["rows"][0]["met_target"] is False
+    assert d["rows"][0]["met_target"] is False   # 1000 < 2500

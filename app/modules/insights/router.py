@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +29,10 @@ from app.modules.insights.schemas import (
     FirmClientRow,
     FirmSummaryResponse,
     RefreshResponse,
+    SalesTargetConfigModel,
     SnapshotResponse,
 )
+from app.services.insights.sales_tracker.config import parse_config
 from app.modules.insights.tasks import refresh_company_snapshot
 
 _CASH_TIGHT = 0.2   # coverage below this = "cash tight" (firm rollup flag)
@@ -167,3 +169,50 @@ async def refresh_snapshot(
         }
     refresh_company_snapshot.delay(str(company_id))
     return {"company_id": str(company_id), "status": "queued", "refreshing": True}
+
+
+@router.get(
+    "/{company_id}/sales-target/",
+    response_model=SalesTargetConfigModel,
+    summary="Get this client's Sales Tracker target settings.",
+)
+async def get_sales_target(
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    company = await db.get(Company, company_id)
+    cfg = ((company.audit_config if company else None) or {}).get("sales_target") or {}
+    return {
+        "basis": cfg.get("basis", "average_3"),
+        "adjustment_pct": cfg.get("adjustment_pct", 0.0),
+        "manual_value": cfg.get("manual_value"),
+    }
+
+
+@router.put(
+    "/{company_id}/sales-target/",
+    response_model=SalesTargetConfigModel,
+    summary="Set this client's Sales Tracker target — applied on the next snapshot refresh.",
+)
+async def set_sales_target(
+    payload: SalesTargetConfigModel,
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    # Validate/sanitise through the same parser the tracker uses, then store the
+    # config under the company's audit_config JSONB (the shared settings bucket).
+    cfg = parse_config(payload.model_dump())
+    company = await db.get(Company, company_id)
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="company not found",
+        )
+    merged = dict(company.audit_config or {})
+    merged["sales_target"] = {
+        "basis": cfg.basis,
+        "adjustment_pct": cfg.adjustment_pct,
+        "manual_value": cfg.manual_value,
+    }
+    company.audit_config = merged  # reassign so SQLAlchemy flags the JSONB dirty
+    await db.commit()
+    return merged["sales_target"]

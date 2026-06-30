@@ -152,6 +152,14 @@ class RefreshResponse(BaseModel):
     refreshing: bool = True
 
 
+class SalesTargetConfigModel(BaseModel):
+    # one of: none | previous_month | average_3 | average_6 | average_12 |
+    #         same_month_last_year | xero_budget | manual
+    basis: str = "average_3"
+    adjustment_pct: float = 0.0       # +/- nudge applied to the derived target
+    manual_value: Optional[float] = None  # only for basis == "manual"
+
+
 class FirmClientRow(BaseModel):
     company_id: str
     name: str

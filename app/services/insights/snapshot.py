@@ -8,7 +8,7 @@ serve). Network I/O lives here; persistence is the caller's job.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Optional
 
 from app.modules.integrations.service import IntegrationService
 from app.services.insights.balance_sheet import compute_financial_position
@@ -23,6 +23,7 @@ async def compute_company_snapshot(
     connection_id: str,
     tenant_id: str,
     periods: int = 11,
+    sales_target_config: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     integ = IntegrationService()
     pnl, bs, tb, bank_txns, bank_summary = await asyncio.gather(
@@ -44,7 +45,7 @@ async def compute_company_snapshot(
         )
 
     profitability = compute_profitability(pnl)
-    sales_tracker = compute_sales_tracker(pnl)
+    sales_tracker = compute_sales_tracker(pnl, config_raw=sales_target_config)
     position = compute_financial_position(bs)
     net_profit = profitability["totals"]["net_profit"]
     corp_tax = estimate_corporation_tax(net_profit)
