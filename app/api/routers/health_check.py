@@ -9,11 +9,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
+import redis.asyncio as async_redis
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.db import get_db
+from app.modules.healthcheck.services.audit_service import META_FIELD, batch_key
 from app.schemas.transaction import BatchHealthCheckRequest, BatchHealthCheckResponse
 from app.services.healthcheck import run_batch_health_check
 
@@ -215,32 +218,82 @@ async def _run_async(
 
 @router.get(
     "/audit/progress/{batch_id}",
-    summary="Server-Sent Events stream of progress for an in-flight async batch.",
+    summary="Server-Sent Events stream of progress for an in-flight audit batch.",
 )
 async def audit_progress(batch_id: str) -> StreamingResponse:
+    """Progress stream for BOTH audit paths.
+
+    * In-process async batch (``/health-check/batch/async``) → buffered in
+      ``_batches`` and streamed event-by-event.
+    * Celery historical audit (``/health/sync-xero-history/``) → its progress
+      lives in the Redis meta hash (written by the worker — a *different*
+      process), so stream that by polling the hash until a terminal status.
+      Without this, a Celery ``batch_id`` 404s here even though the audit is
+      running fine; the frontend's audit-progress UI was reading from this
+      endpoint and getting nothing.
+    """
     progress = _batches.get(batch_id)
-    if progress is None:
+    if progress is not None:
+        async def event_stream():
+            last_index = 0
+            idle_ticks = 0
+            while True:
+                while last_index < len(progress.events):
+                    evt = progress.events[last_index]
+                    last_index += 1
+                    idle_ticks = 0
+                    yield f"data: {json.dumps(evt)}\n\n"
+                    if evt.get("event") == "end":
+                        return
+                await asyncio.sleep(0.1)
+                idle_ticks += 1
+                # Heartbeat every ~10s so proxies/clients don't drop the connection.
+                if idle_ticks >= 100:
+                    idle_ticks = 0
+                    yield ": heartbeat\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    # Not an in-process batch → treat it as a Celery historical-audit batch and
+    # stream its progress from the Redis meta hash.
+    redis: async_redis.Redis = async_redis.from_url(
+        settings.REDIS_URL, decode_responses=True,
+    )
+    raw = await redis.hget(batch_key(batch_id), META_FIELD)
+    if not raw:
+        await redis.aclose()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Unknown batch_id (expired or never started).",
         )
 
-    async def event_stream():
-        last_index = 0
-        idle_ticks = 0
-        while True:
-            while last_index < len(progress.events):
-                evt = progress.events[last_index]
-                last_index += 1
-                idle_ticks = 0
-                yield f"data: {json.dumps(evt)}\n\n"
-                if evt.get("event") == "end":
+    async def redis_event_stream():
+        try:
+            last_snapshot = None
+            idle_ticks = 0
+            while True:
+                raw = await redis.hget(batch_key(batch_id), META_FIELD)
+                meta = json.loads(raw) if raw else None
+                if meta is None:                    # hash expired mid-stream
+                    yield f"data: {json.dumps({'event': 'end', 'status': 'expired'})}\n\n"
                     return
-            await asyncio.sleep(0.1)
-            idle_ticks += 1
-            # Heartbeat every ~10s so proxies/clients don't drop the connection.
-            if idle_ticks >= 100:
-                idle_ticks = 0
-                yield ": heartbeat\n\n"
+                snapshot = (
+                    meta.get("stage"), meta.get("stage_label"),
+                    meta.get("status"), meta.get("total"), meta.get("trapped"),
+                )
+                if snapshot != last_snapshot:
+                    last_snapshot = snapshot
+                    idle_ticks = 0
+                    yield f"data: {json.dumps({'event': 'progress', **meta})}\n\n"
+                if meta.get("status") in ("completed", "failed"):
+                    yield f"data: {json.dumps({'event': 'end', 'status': meta.get('status')})}\n\n"
+                    return
+                await asyncio.sleep(0.5)
+                idle_ticks += 1
+                if idle_ticks >= 20:                # ~10s heartbeat
+                    idle_ticks = 0
+                    yield ": heartbeat\n\n"
+        finally:
+            await redis.aclose()
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(redis_event_stream(), media_type="text/event-stream")
