@@ -356,6 +356,13 @@ async def _handle_auth_creation(
             db.add(company)
             await db.flush()  # get company.id
             new_company_ids.append(company.id)
+            from app.modules.healthcheck.services.activity import record_event
+            await record_event(
+                db, firm_id=firm_id, type="org_connected",
+                title=f"Connected {tenant_name}",
+                actor_email=(user.email if user is not None else None),
+                company_id=company.id,
+            )
         else:
             company.name = tenant_name or company.name
             # Re-point to the latest connection (the whole reason a reconnect

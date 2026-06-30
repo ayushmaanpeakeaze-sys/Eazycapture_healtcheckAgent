@@ -338,6 +338,13 @@ async def remove_company(
                 xero_tenant_id=company.xero_tenant_id,
                 name=name,
             ))
+    # Activity feed event (rides the same commit; company_id is a loose ref so
+    # it survives the row's deletion).
+    from app.modules.healthcheck.services.activity import record_event
+    await record_event(
+        db, firm_id=company.firm_id, type="org_removed",
+        title=f"Removed {name}", actor_email=user.email, company_id=company_id,
+    )
     # ON DELETE CASCADE (FKs) clears xero_document / xero_sync_state / invoice /
     # health_check_result / audit_batch / access links with the company row.
     await db.delete(company)
@@ -416,6 +423,99 @@ async def reallow_org(
         "xero_tenant_id": xero_tenant_id,
         "cleared": len(rows),
     }
+
+
+@router.get(
+    "/notifications/",
+    status_code=status.HTTP_200_OK,
+    summary="Notification feed — health alerts (real score drops) + team/connect events.",
+)
+async def notifications_feed(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Unified feed: live health-score alerts (a real drop is detected against
+    the last snapshot in ``score_history``) + recorded team/access/connect
+    events (invite sent/accepted, access granted, org connected/removed)."""
+    from app.modules.auth.models import User
+    from app.modules.healthcheck.models import Notification, ScoreHistory
+    from app.modules.healthcheck.services.panorama_service import (
+        CompaniesPanoramaService,
+    )
+
+    firm_id = None
+    if user.user_id is not None:
+        u = await db.get(User, user.user_id)
+        firm_id = u.firm_id if u is not None else None
+    allowed = await allowed_company_ids_for(db, user)
+
+    items: list[dict[str, object]] = []
+
+    # --- derived health alerts: live score vs the last recorded snapshot ---
+    panorama = await CompaniesPanoramaService(db).get_panorama(
+        days=30, allowed_company_ids=allowed,
+    )
+    for c in panorama.results:
+        score = c.health_score
+        if score is None:
+            continue
+        prev = (
+            await db.execute(
+                select(ScoreHistory.health_score)
+                .where(ScoreHistory.company_id == c.company_id)
+                .order_by(ScoreHistory.recorded_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        dropped = prev is not None and score < prev
+        sev = "critical" if score < 40 else ("watch" if score < 70 else "info")
+        if sev == "info" and not dropped:
+            continue  # healthy + no drop → nothing to alert
+        title = (
+            f"{c.name} health score dropped from {prev}% to {score}%"
+            if dropped
+            else f"{c.name} health score {score}% — needs attention"
+        )
+        items.append({
+            "kind": "alert",
+            "type": "score_drop" if dropped else "low_score",
+            "severity": sev,
+            "title": title,
+            "detail": c.top_issue,
+            "company_id": str(c.company_id),
+            "at": c.last_audit_at.isoformat() if c.last_audit_at else None,
+        })
+
+    # --- recorded team / access / connect events ---
+    events = (
+        await db.execute(
+            select(Notification)
+            .where(Notification.firm_id == firm_id)
+            .order_by(Notification.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    for e in events:
+        items.append({
+            "kind": "event",
+            "type": e.type,
+            "severity": e.severity,
+            "title": e.title,
+            "detail": e.detail,
+            "actor_email": e.actor_email,
+            "company_id": str(e.company_id) if e.company_id else None,
+            "at": e.created_at.isoformat() if e.created_at else None,
+        })
+
+    items.sort(key=lambda x: x.get("at") or "", reverse=True)
+    items = items[:limit]
+    counts = {"critical": 0, "watch": 0, "info": 0}
+    for it in items:
+        s = it.get("severity", "info")
+        if s in counts:
+            counts[s] += 1
+    return {"counts": counts, "items": items}
 
 
 @router.get(

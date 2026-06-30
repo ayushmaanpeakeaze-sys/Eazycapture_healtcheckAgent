@@ -393,6 +393,11 @@ async def accept_invite(
     user.status = "active"
     user.invite_token = None
     user.invite_expires_at = None
+    from app.modules.healthcheck.services.activity import record_event
+    await record_event(
+        db, firm_id=user.firm_id, type="invite_accepted",
+        title=f"{user.email} accepted the invite", actor_email=user.email,
+    )
     await db.commit()
 
     token = create_access_token(user_id=user.id, email=user.email, role=user.role)
@@ -525,6 +530,14 @@ async def invite_team_member(
 
     for cid in selected_ids:
         db.add(UserCompanyAccess(user_id=user.id, company_id=cid))
+    from app.modules.healthcheck.services.activity import record_event
+    await record_event(
+        db, firm_id=firm_id, type="invite_sent",
+        title=f"Invited {email}",
+        detail=("all orgs" if payload.access_mode == "all"
+                else f"{len(selected_ids)} org(s)"),
+        actor_email=admin.email,
+    )
     await db.commit()
 
     # Send the invite email *after* commit so a flaky SMTP never rolls back
@@ -620,6 +633,13 @@ async def set_user_companies(
         await db.delete(row)
     for cid in selected_ids:
         db.add(UserCompanyAccess(user_id=user_id, company_id=cid))
+    from app.modules.healthcheck.services.activity import record_event
+    scope = ("all orgs" if payload.access_mode == "all"
+             else f"{len(selected_ids)} org(s)")
+    await record_event(
+        db, firm_id=user.firm_id, type="access_granted",
+        title=f"Updated {user.email}'s access ({scope})", actor_email=admin.email,
+    )
     await db.commit()
 
     return UserSummary(

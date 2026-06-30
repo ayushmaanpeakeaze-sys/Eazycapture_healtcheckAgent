@@ -91,7 +91,14 @@ def _do_refresh_company_snapshot(company_id: str) -> dict:
                 )
             )
             # 9th KPI — Bookkeeping Health from stored audit data (DB, not Xero).
-            snap["payload"]["bookkeeping_health"] = _bookkeeping_health(db, company.id)
+            bh = _bookkeeping_health(db, company.id)
+            snap["payload"]["bookkeeping_health"] = bh
+            # Snapshot the health score over time so the Alerts feed can detect a
+            # REAL drop ("60% -> 2%") instead of just the current low number.
+            _hs = bh.get("health_score")
+            if _hs is not None:
+                from app.modules.healthcheck.models import ScoreHistory
+                db.add(ScoreHistory(company_id=company.id, health_score=int(_hs)))
             values = {
                 "company_id": company.id,
                 "computed_at": datetime.now(timezone.utc),

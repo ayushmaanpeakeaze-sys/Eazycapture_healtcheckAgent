@@ -140,6 +140,61 @@ class ExcludedTenant(Base):
     )
 
 
+class ScoreHistory(Base):
+    """One health-score snapshot per audit run, so the Alerts feed can show a
+    REAL drop ("60% → 2%") instead of just the current low number."""
+
+    __tablename__ = "score_history"
+    __table_args__ = (
+        Index("ix_score_history_company_time", "company_id", "recorded_at"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    health_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
+class Notification(Base):
+    """Firm-scoped activity/notification feed entry — team + access + connect
+    events (invite sent/accepted, access granted, org connected/removed). Health
+    alerts (score drops) are derived live in the endpoint, not stored here.
+    ``company_id`` is a loose reference (no FK) so an org's removal event
+    survives the org's deletion."""
+
+    __tablename__ = "notification"
+    __table_args__ = (
+        Index("ix_notification_firm_time", "firm_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    firm_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("firm.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # invite_sent | invite_accepted | access_granted | org_connected | org_removed
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False, default="info")
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    actor_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    company_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
 class Invoice(Base):
     """An invoice or bill mirrored from Xero (or seeded for demo)."""
 
