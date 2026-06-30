@@ -304,7 +304,7 @@ async def remove_company(
     revoked (other orgs on the same grant keep working). Manual access check
     (admin or assigned) — works whether the org is active or already disconnected.
     """
-    from app.modules.healthcheck.models import Company
+    from app.modules.healthcheck.models import Company, ExcludedTenant
 
     company = await db.get(Company, company_id)
     if company is None:
@@ -319,6 +319,25 @@ async def remove_company(
             content={"detail": "You are not assigned to this company."},
         )
     name = company.name
+    # Remember this org as removed so a later connect can't resurrect it: the
+    # Xero grant covers every org the user can reach, so the connect webhook
+    # re-enumerates them all. Only meaningful for a real firm + tenant; the
+    # re-add action (DELETE /excluded-org/{tenant}/) clears this.
+    if company.firm_id is not None and company.xero_tenant_id:
+        already = (
+            await db.execute(
+                select(ExcludedTenant.id).where(
+                    ExcludedTenant.firm_id == company.firm_id,
+                    ExcludedTenant.xero_tenant_id == company.xero_tenant_id,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if already is None:
+            db.add(ExcludedTenant(
+                firm_id=company.firm_id,
+                xero_tenant_id=company.xero_tenant_id,
+                name=name,
+            ))
     # ON DELETE CASCADE (FKs) clears xero_document / xero_sync_state / invoice /
     # health_check_result / audit_batch / access links with the company row.
     await db.delete(company)
@@ -327,6 +346,75 @@ async def remove_company(
         "status": "removed",
         "company_id": str(company_id),
         "name": name,
+    }
+
+
+@router.get(
+    "/excluded-orgs/",
+    status_code=status.HTTP_200_OK,
+    summary="Xero orgs this firm removed (the connect won't re-add them) — drives the re-add UI.",
+)
+async def list_excluded_orgs(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """List orgs the firm removed. They stay out of the dashboard (and aren't
+    resurrected by a new connect) until re-allowed. The Xero grant still covers
+    them, so re-adding needs no re-OAuth — just clear the exclusion + reconnect.
+    """
+    from app.modules.auth.models import User
+    from app.modules.healthcheck.models import ExcludedTenant
+
+    if user.user_id is None:
+        return {"excluded": []}
+    u = await db.get(User, user.user_id)
+    firm_id = u.firm_id if u is not None else None
+    if firm_id is None:
+        return {"excluded": []}
+    rows = (
+        await db.execute(
+            select(ExcludedTenant.xero_tenant_id, ExcludedTenant.name).where(
+                ExcludedTenant.firm_id == firm_id
+            )
+        )
+    ).all()
+    return {"excluded": [{"xero_tenant_id": t, "name": n} for t, n in rows]}
+
+
+@router.delete(
+    "/excluded-org/{xero_tenant_id}/",
+    status_code=status.HTTP_200_OK,
+    summary="Re-allow a removed org (clears the exclusion); reconnect to restore it.",
+)
+async def reallow_org(
+    xero_tenant_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Clear this firm's exclusion for one Xero org so it returns on the next
+    connect (the grant already covers it — no re-OAuth needed)."""
+    from app.modules.auth.models import User
+    from app.modules.healthcheck.models import ExcludedTenant
+
+    firm_id = None
+    if user.user_id is not None:
+        u = await db.get(User, user.user_id)
+        firm_id = u.firm_id if u is not None else None
+    rows = (
+        await db.execute(
+            select(ExcludedTenant).where(
+                ExcludedTenant.firm_id == firm_id,
+                ExcludedTenant.xero_tenant_id == xero_tenant_id,
+            )
+        )
+    ).scalars().all()
+    for r in rows:
+        await db.delete(r)
+    await db.commit()
+    return {
+        "status": "re-allowed",
+        "xero_tenant_id": xero_tenant_id,
+        "cleared": len(rows),
     }
 
 

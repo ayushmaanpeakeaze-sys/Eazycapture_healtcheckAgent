@@ -31,7 +31,7 @@ from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
 from app.core.db import get_db
 from app.modules.auth.models import User, UserCompanyAccess
-from app.modules.healthcheck.models import Company
+from app.modules.healthcheck.models import Company, ExcludedTenant
 from app.modules.healthcheck.services.audit_service import AuditService
 from app.modules.integrations.nango.service import NangoService
 from app.modules.integrations.service import IntegrationService
@@ -299,13 +299,36 @@ async def _handle_auth_creation(
         )
         return
 
+    # The org belongs to the connecting accountant's firm (None in demo).
+    firm_id = user.firm_id if user is not None else None
+
+    # Orgs this firm has explicitly removed. The Xero grant re-enumerates EVERY
+    # org the user can reach, so without this a single new connect would
+    # resurrect every org they had deleted/disconnected. Skip them here; the
+    # "re-add" action clears the exclusion so the org can return.
+    excluded: set[str] = set()
+    if firm_id is not None:
+        excluded = set(
+            (
+                await db.execute(
+                    select(ExcludedTenant.xero_tenant_id).where(
+                        ExcludedTenant.firm_id == firm_id
+                    )
+                )
+            ).scalars().all()
+        )
+
     new_company_ids: list[UUID] = []
     for t in tenants:
         tenant_id = t["tenant_id"]
         tenant_name = t["tenant_name"]
 
-        # The org belongs to the connecting accountant's firm (None in demo).
-        firm_id = user.firm_id if user is not None else None
+        if tenant_id in excluded:
+            logger.info(
+                "%s skipping removed org tenant=%s for firm=%s",
+                _LOG_TAG, tenant_id, firm_id,
+            )
+            continue
 
         # Upsert keyed on (firm_id, tenant_id) — a Xero org belongs to exactly
         # ONE firm, so a RECONNECT (which mints a fresh nango_connection_id) must
@@ -335,9 +358,10 @@ async def _handle_auth_creation(
             new_company_ids.append(company.id)
         else:
             company.name = tenant_name or company.name
-            company.is_active = True
             # Re-point to the latest connection (the whole reason a reconnect
-            # exists) so audits/syncs use the fresh, non-expired connection.
+            # exists) so audits/syncs use the fresh, non-expired connection. Do
+            # NOT force is_active back on — an org the user disconnected stays
+            # disconnected (they re-enable it via the one-click reconnect).
             company.nango_connection_id = connection_id
             if company.firm_id is None and firm_id is not None:
                 company.firm_id = firm_id

@@ -41,17 +41,17 @@ class Company(Base):
 
     __tablename__ = "company"
     __table_args__ = (
-        # An org's natural key is (connection, tenant) — NOT tenant alone,
-        # because two accountants can each connect the same client org under
-        # different connection_ids. Partial so seed/demo rows (NULL keys)
-        # don't collide and the webhook upsert stays idempotent.
+        # An org belongs to exactly ONE firm — the uniqueness key is
+        # (firm, tenant), NOT (connection, tenant): a reconnect mints a fresh
+        # connection_id but must update the SAME org, not duplicate it. Partial
+        # so seed/demo rows (NULL firm) don't collide.
         Index(
-            "uq_company_connection_tenant",
-            "nango_connection_id",
+            "uq_company_firm_tenant",
+            "firm_id",
             "xero_tenant_id",
             unique=True,
             postgresql_where=text(
-                "nango_connection_id IS NOT NULL AND xero_tenant_id IS NOT NULL"
+                "firm_id IS NOT NULL AND xero_tenant_id IS NOT NULL"
             ),
         ),
     )
@@ -102,6 +102,41 @@ class Company(Base):
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+
+class ExcludedTenant(Base):
+    """A Xero org a firm has explicitly removed (deleted / disconnected) so the
+    connect webhook does NOT re-create it when it re-enumerates the shared Xero
+    grant. The grant covers every org the user can reach, so without this a
+    single new connect would resurrect every org they had removed. Deleting the
+    row (the "re-add" action) lets the org return on the next connect/reconcile.
+    """
+
+    __tablename__ = "excluded_tenant"
+    __table_args__ = (
+        Index(
+            "uq_excluded_tenant_firm",
+            "firm_id",
+            "xero_tenant_id",
+            unique=True,
+            postgresql_where=text("firm_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    firm_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("firm.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    xero_tenant_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
 
 
