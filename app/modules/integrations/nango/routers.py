@@ -401,6 +401,21 @@ async def _handle_auth_creation(
     finally:
         await audit.close()
 
+    # Auto-compute the Insights snapshot for each new org so the dashboard's
+    # bank-reconciliation columns (recent txn / last reconciled / unreconciled)
+    # are populated on connect instead of blank until the next manual/nightly
+    # refresh. Fire-and-forget; reads live Xero and is fully independent of the
+    # sync + audit dispatched above (separate task, separate KPIs).
+    from app.modules.insights.tasks import refresh_company_snapshot
+
+    for cid in new_company_ids:
+        try:
+            refresh_company_snapshot.delay(str(cid))
+        except Exception:
+            logger.exception(
+                "%s insights snapshot dispatch failed for company=%s", _LOG_TAG, cid,
+            )
+
     logger.info(
         "%s connect: connection=%s user=%s orgs=%d new=%d audits_dispatched=%d",
         _LOG_TAG, connection_id, user_id, len(tenants),
