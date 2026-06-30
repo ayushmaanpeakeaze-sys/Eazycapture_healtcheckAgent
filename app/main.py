@@ -56,10 +56,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-if settings.CORS_ALLOWED_ORIGINS:
+# Always allow the usual local dev frontend origins on top of the env-configured
+# production origins, so a developer can point a local frontend at ANY backend
+# (incl. prod) without hitting a CORS wall. Allowing localhost is low-risk — only
+# a browser on the developer's own machine can use it.
+_LOCAL_DEV_ORIGINS = (
+    "http://localhost:3000", "http://127.0.0.1:3000",
+    "http://localhost:5173", "http://127.0.0.1:5173",
+)
+_cors_origins = tuple(
+    dict.fromkeys((*settings.CORS_ALLOWED_ORIGINS, *_LOCAL_DEV_ORIGINS))
+)
+if _cors_origins:
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ALLOWED_ORIGINS,
+        allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
