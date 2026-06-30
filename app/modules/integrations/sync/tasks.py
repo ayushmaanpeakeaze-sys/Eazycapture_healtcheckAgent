@@ -35,33 +35,45 @@ async def _run_company_sync(
     force_full: bool,
     entities: Optional[list[str]],
 ) -> dict[str, Any]:
-    async with AsyncSessionLocal() as db:
-        company = (
-            await db.execute(select(Company).where(Company.id == company_id))
-        ).scalar_one_or_none()
-        if company is None:
-            return {"status": "error", "error": "company not found"}
-        if not company.nango_connection_id or not company.xero_tenant_id:
-            return {"status": "skipped", "error": "company not connected"}
+    # Celery runs each task body in its OWN ``asyncio.run()`` event loop. The
+    # shared async engine (``app.core.db.engine``) pools connections bound to the
+    # loop that first opened them; once that loop closes, a pooled connection is
+    # tied to a dead loop and the NEXT task's await on it raises "Event loop is
+    # closed" — wedging the worker after exactly one successful sync. Disposing
+    # the pool at the end of this loop guarantees every task starts on a fresh
+    # pool bound to its own loop.
+    from app.core.db import engine as _async_engine
 
-        engine = SyncEngine()
-        results = await engine.sync_company(
-            db, company, entities=entities, force_full=force_full,
-        )
-        return {
-            "status": "ok",
-            "company_id": str(company_id),
-            "entities": {
-                e: {
-                    "status": r.status,
-                    "records": r.records,
-                    "mode": r.mode,
-                    "error": r.error,
-                }
-                for e, r in results.items()
-            },
-            "total_records": sum(r.records for r in results.values()),
-        }
+    try:
+        async with AsyncSessionLocal() as db:
+            company = (
+                await db.execute(select(Company).where(Company.id == company_id))
+            ).scalar_one_or_none()
+            if company is None:
+                return {"status": "error", "error": "company not found"}
+            if not company.nango_connection_id or not company.xero_tenant_id:
+                return {"status": "skipped", "error": "company not connected"}
+
+            sync_engine = SyncEngine()
+            results = await sync_engine.sync_company(
+                db, company, entities=entities, force_full=force_full,
+            )
+            return {
+                "status": "ok",
+                "company_id": str(company_id),
+                "entities": {
+                    e: {
+                        "status": r.status,
+                        "records": r.records,
+                        "mode": r.mode,
+                        "error": r.error,
+                    }
+                    for e, r in results.items()
+                },
+                "total_records": sum(r.records for r in results.values()),
+            }
+    finally:
+        await _async_engine.dispose()
 
 
 @celery_app.task(name="healthcheck.sync_xero", bind=False, max_retries=0)

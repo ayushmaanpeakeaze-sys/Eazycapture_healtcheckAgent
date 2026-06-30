@@ -31,6 +31,12 @@ celery_app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Safety net: force-kill (and, with acks_late, redeliver) any task that runs
+    # past the hard limit so a stuck upstream call can never wedge a worker slot
+    # indefinitely. The longest real task (a full historical audit) finishes well
+    # under this.
+    task_soft_time_limit=540,
+    task_time_limit=600,
     # Daily reconcile: re-enumerate each accountant's Xero orgs to pick up
     # newly-granted clients and deactivate revoked ones. Requires a Celery
     # BEAT process running alongside the worker:
