@@ -304,17 +304,24 @@ async def _handle_auth_creation(
         tenant_id = t["tenant_id"]
         tenant_name = t["tenant_name"]
 
-        # Upsert Company keyed on (connection_id, tenant_id).
-        company = (
-            await db.execute(
-                select(Company).where(
-                    Company.nango_connection_id == connection_id,
-                    Company.xero_tenant_id == tenant_id,
-                )
-            )
-        ).scalar_one_or_none()
         # The org belongs to the connecting accountant's firm (None in demo).
         firm_id = user.firm_id if user is not None else None
+
+        # Upsert keyed on (firm_id, tenant_id) — a Xero org belongs to exactly
+        # ONE firm, so a RECONNECT (which mints a fresh nango_connection_id) must
+        # UPDATE that org and re-point it at the new connection, NOT create a
+        # duplicate row. Keying the lookup on connection_id was the duplicate-org
+        # bug. Demo orgs have no firm, so they dedupe on (firm IS NULL, tenant).
+        org_filter = [Company.xero_tenant_id == tenant_id]
+        if firm_id is not None:
+            org_filter.append(Company.firm_id == firm_id)
+        else:
+            org_filter.append(Company.firm_id.is_(None))
+        company = (
+            await db.execute(
+                select(Company).where(*org_filter).order_by(Company.created_at)
+            )
+        ).scalars().first()
         if company is None:
             company = Company(
                 name=tenant_name,
@@ -329,6 +336,9 @@ async def _handle_auth_creation(
         else:
             company.name = tenant_name or company.name
             company.is_active = True
+            # Re-point to the latest connection (the whole reason a reconnect
+            # exists) so audits/syncs use the fresh, non-expired connection.
+            company.nango_connection_id = connection_id
             if company.firm_id is None and firm_id is not None:
                 company.firm_id = firm_id
 
