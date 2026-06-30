@@ -75,8 +75,7 @@ def _bookkeeping_health(db, company_id: UUID) -> dict:
 _STAGGER_SECONDS = 4
 
 
-@celery_app.task(name="insights.refresh_company")
-def refresh_company_snapshot(company_id: str) -> dict:
+def _do_refresh_company_snapshot(company_id: str) -> dict:
     """Fetch + compute + upsert one company's Insights snapshot."""
     with SyncSessionLocal() as db:
         company = db.get(Company, UUID(company_id))
@@ -122,6 +121,29 @@ def refresh_company_snapshot(company_id: str) -> dict:
         db.execute(stmt)
         db.commit()
         return {"company_id": company_id, "status": values["status"]}
+
+
+@celery_app.task(name="insights.refresh_company")
+def refresh_company_snapshot(company_id: str) -> dict:
+    """Recompute one company's snapshot, then always clear the
+    ``insights:refreshing`` flag the Refresh endpoint set — so the page's spinner
+    stops the instant this finishes (or errors), independent of the data-sync
+    flag. The flag's TTL is only a crash safety net. Nightly refreshes never set
+    the flag, so the delete is a harmless no-op for them."""
+    try:
+        return _do_refresh_company_snapshot(company_id)
+    finally:
+        try:
+            import redis as _redis_sync
+            from app.core.config import settings as _settings
+            _redis_sync.from_url(
+                _settings.REDIS_URL, decode_responses=True
+            ).delete(f"insights:refreshing:{company_id}")
+        except Exception:
+            logger.warning(
+                "[Insights] could not clear insights:refreshing flag for %s",
+                company_id,
+            )
 
 
 @celery_app.task(name="insights.refresh_all")

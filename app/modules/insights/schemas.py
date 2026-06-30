@@ -142,12 +142,14 @@ class SnapshotResponse(BaseModel):
     computed_at: Optional[str] = None
     status: str
     stale: bool                       # True if the snapshot is missing/old
+    refreshing: bool = False          # True while a manual refresh is recomputing
     payload: dict                     # full per-KPI data (see per-KPI schemas)
 
 
 class RefreshResponse(BaseModel):
     company_id: str
-    status: str                       # "queued"
+    status: str                       # "queued" | "already_refreshing"
+    refreshing: bool = True
 
 
 class FirmClientRow(BaseModel):

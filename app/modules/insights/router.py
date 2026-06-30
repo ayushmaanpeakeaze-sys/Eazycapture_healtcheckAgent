@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_db
 from app.core.multi_tenant import allowed_company_ids_for, get_current_company_id
+from app.core.redis_client import get_redis
 from app.modules.healthcheck.models import Company
 from app.modules.insights.models import ClientInsightSnapshot
 from app.modules.insights.schemas import (
@@ -120,6 +121,7 @@ async def get_snapshot(
     company_id: UUID = Depends(get_current_company_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    refreshing = bool(await get_redis().exists(f"insights:refreshing:{company_id}"))
     snap = (await db.execute(
         select(ClientInsightSnapshot).where(
             ClientInsightSnapshot.company_id == company_id
@@ -128,13 +130,15 @@ async def get_snapshot(
     if snap is None:
         return {
             "company_id": str(company_id), "computed_at": None,
-            "status": "none", "stale": True, "payload": {},
+            "status": "none", "stale": True, "refreshing": refreshing,
+            "payload": {},
         }
     return {
         "company_id": str(company_id),
         "computed_at": snap.computed_at.isoformat() if snap.computed_at else None,
         "status": snap.status,
         "stale": snap.status != "ok",
+        "refreshing": refreshing,
         "payload": snap.payload or {},
     }
 
@@ -148,5 +152,18 @@ async def get_snapshot(
 async def refresh_snapshot(
     company_id: UUID = Depends(get_current_company_id),
 ) -> dict:
+    # Mirror the data-sync's ``syncing`` flag — but on its OWN key so the
+    # Insights "Refresh" button is independent of the Refresh-Data sync. Set a
+    # short-lived flag (the task clears it on finish/error; the TTL is a safety
+    # net) so the page can show a spinner until the recompute lands, and a second
+    # tap while one is running is a no-op instead of a duplicate recompute.
+    key = f"insights:refreshing:{company_id}"
+    started = await get_redis().set(key, "1", nx=True, ex=300)
+    if not started:
+        return {
+            "company_id": str(company_id),
+            "status": "already_refreshing",
+            "refreshing": True,
+        }
     refresh_company_snapshot.delay(str(company_id))
-    return {"company_id": str(company_id), "status": "queued"}
+    return {"company_id": str(company_id), "status": "queued", "refreshing": True}
