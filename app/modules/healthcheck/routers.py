@@ -168,6 +168,7 @@ async def refresh_data(
 async def disconnect_company(
     company_id: UUID = Depends(get_current_company_id),
     db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, object]:
     """Remove an org from EazyCapture: mark it inactive so it drops off the
     dashboard and stops syncing/auditing.
@@ -186,6 +187,12 @@ async def disconnect_company(
             content={"detail": "company not found"},
         )
     company.is_active = False
+    from app.modules.healthcheck.services.activity import record_event
+    await record_event(
+        db, firm_id=company.firm_id, type="org_disconnected",
+        title=f"Disconnected {company.name}",
+        actor_email=user.email, company_id=company_id,
+    )
     await db.commit()
     return {
         "status": "disconnected",
@@ -438,8 +445,16 @@ async def reallow_org(
             )
         )
     ).scalars().all()
+    name = rows[0].name if rows else None
     for r in rows:
         await db.delete(r)
+    if rows:
+        from app.modules.healthcheck.services.activity import record_event
+        await record_event(
+            db, firm_id=firm_id, type="org_reallowed",
+            title=f"Re-allowed {name or xero_tenant_id}",
+            actor_email=user.email,
+        )
     await db.commit()
     return {
         "status": "re-allowed",
