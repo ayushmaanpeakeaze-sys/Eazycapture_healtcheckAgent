@@ -351,6 +351,15 @@ class IntegrationService:
         """Org metadata: Name, BaseCurrency, ShortCode, etc."""
         return await self._nango.fetch_xero_organisation(connection_id, tenant_id)
 
+    async def revoke_xero_org(
+        self,
+        connection_id: str,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        """Revoke ONE org's Xero grant via the ``revoke-connection`` Action so it
+        returns to allow-access. Leaves other orgs on the same login connected."""
+        return await self._nango.action_revoke_connection(connection_id, tenant_id)
+
     async def fetch_profit_and_loss(
         self,
         connection_id: str,

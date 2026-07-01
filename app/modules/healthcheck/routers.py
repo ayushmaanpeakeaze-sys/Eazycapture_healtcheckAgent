@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, get_current_user
@@ -288,21 +288,28 @@ async def reconnect_company(
 @router.delete(
     "/company/{company_id}/",
     status_code=status.HTTP_200_OK,
-    summary="PERMANENTLY remove an org + ALL its data (hard delete). Irreversible.",
+    summary="Remove an org + ALL its data (hard delete). ?forget=true to also clear the exclusion.",
 )
 async def remove_company(
     company_id: UUID,
+    forget: bool = Query(
+        False,
+        description="Permanently forget: also clear the 'removed' exclusion so a "
+        "later reconnect brings the org back fresh (it appears in Xero allow-access "
+        "again). Default false keeps the org in Removed Organisations (blocked).",
+    ),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, object]:
     """Hard-delete an org and EVERYTHING under it — synced Xero docs, sync
     state, invoices, audit batches, health-check results, access links. Unlike
-    *disconnect* (which only hides + keeps data), this is irreversible: the row
-    is gone and a future reconnect starts fresh.
+    *disconnect* (which only hides + keeps data), this is irreversible.
 
-    Use for cleaning up duplicate/test orgs. The shared Nango connection is NOT
-    revoked (other orgs on the same grant keep working). Manual access check
-    (admin or assigned) — works whether the org is active or already disconnected.
+    Default (``forget=false``) keeps the org in Removed Organisations, blocked
+    from reconnect. ``forget=true`` clears that block AND revokes this org's Xero
+    grant via the ``revoke-connection`` Action, so it returns to Xero's
+    allow-access screen — other orgs on the same login stay connected. Manual
+    access check (admin or assigned).
     """
     from app.modules.healthcheck.models import Company, ExcludedTenant
 
@@ -319,41 +326,59 @@ async def remove_company(
             content={"detail": "You are not assigned to this company."},
         )
     name = company.name
-    # Remember this org as removed so a later connect can't resurrect it: the
-    # Xero grant covers every org the user can reach, so the connect webhook
-    # re-enumerates them all. Only meaningful for a real firm + tenant; the
-    # re-add action (DELETE /excluded-org/{tenant}/) clears this.
-    if company.firm_id is not None and company.xero_tenant_id:
-        already = (
+    conn = company.nango_connection_id
+    tenant = company.xero_tenant_id
+
+    revoked = False
+    if forget and conn and tenant:
+        from app.modules.integrations.service import IntegrationService
+
+        integ = IntegrationService()
+        if integ.is_connected(conn, tenant):
+            result = await integ.revoke_xero_org(conn, tenant)
+            revoked = bool(result.get("revoked"))
+
+    if company.firm_id is not None and tenant:
+        if forget:
             await db.execute(
-                select(ExcludedTenant.id).where(
+                delete(ExcludedTenant).where(
                     ExcludedTenant.firm_id == company.firm_id,
-                    ExcludedTenant.xero_tenant_id == company.xero_tenant_id,
-                ).limit(1)
+                    ExcludedTenant.xero_tenant_id == tenant,
+                )
             )
-        ).scalar_one_or_none()
-        if already is None:
-            db.add(ExcludedTenant(
-                firm_id=company.firm_id,
-                xero_tenant_id=company.xero_tenant_id,
-                name=name,
-            ))
-    # Activity feed event (rides the same commit; company_id is a loose ref so
-    # it survives the row's deletion).
+        else:
+            already = (
+                await db.execute(
+                    select(ExcludedTenant.id).where(
+                        ExcludedTenant.firm_id == company.firm_id,
+                        ExcludedTenant.xero_tenant_id == tenant,
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+            if already is None:
+                db.add(ExcludedTenant(
+                    firm_id=company.firm_id,
+                    xero_tenant_id=tenant,
+                    name=name,
+                ))
+
     from app.modules.healthcheck.services.activity import record_event
     await record_event(
-        db, firm_id=company.firm_id, type="org_removed",
-        title=f"Removed {name}", actor_email=user.email, company_id=company_id,
+        db, firm_id=company.firm_id,
+        type="org_forgotten" if forget else "org_removed",
+        title=f"{'Permanently forgot' if forget else 'Removed'} {name}",
+        actor_email=user.email, company_id=company_id,
     )
-    # ON DELETE CASCADE (FKs) clears xero_document / xero_sync_state / invoice /
-    # health_check_result / audit_batch / access links with the company row.
     await db.delete(company)
     await db.commit()
-    return {
-        "status": "removed",
+    payload: dict[str, object] = {
+        "status": "forgotten" if forget else "removed",
         "company_id": str(company_id),
         "name": name,
     }
+    if forget:
+        payload["revoked"] = revoked
+    return payload
 
 
 @router.get(

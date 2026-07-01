@@ -274,3 +274,30 @@ async def test_send_raises_on_auth_failure_for_reads_only(monkeypatch):
     assert await client._send(
         "POST", "http://x/proxy/api.xro/2.0/Invoices", headers={},
     ) is None
+
+
+async def test_action_revoke_connection_triggers_with_tenant(monkeypatch):
+    svc = NangoService()
+    captured = {}
+
+    async def fake_trigger(**kwargs):
+        captured.update(kwargs)
+        return {"revoked": True, "connectionId": "xero-conn-9"}
+
+    monkeypatch.setattr(svc._client, "trigger_action", fake_trigger)
+    out = await svc.action_revoke_connection("conn-1", "tenant-x")
+
+    assert captured["action"] == "revoke-connection"
+    assert captured["input_data"] == {"tenantId": "tenant-x"}
+    assert out == {"revoked": True, "connectionId": "xero-conn-9"}
+
+
+async def test_action_revoke_connection_is_best_effort_on_error(monkeypatch):
+    svc = NangoService()
+
+    async def boom(**kwargs):
+        raise RuntimeError("token expired")
+
+    monkeypatch.setattr(svc._client, "trigger_action", boom)
+    out = await svc.action_revoke_connection("conn-1", "tenant-x")
+    assert out == {"revoked": False, "connectionId": None}

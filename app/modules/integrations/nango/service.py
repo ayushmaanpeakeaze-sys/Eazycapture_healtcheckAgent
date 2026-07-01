@@ -367,6 +367,29 @@ class NangoService:
             return result["report"]
         return None
 
+    async def action_revoke_connection(
+        self,
+        connection_id: str,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        """``revoke-connection`` — revoke ONE org's Xero grant (DELETE /connections/{id})."""
+        try:
+            result = await self._client.trigger_action(
+                connection_id=connection_id,
+                provider_config_key=self._provider_config_key,
+                action="revoke-connection",
+                input_data={"tenantId": tenant_id},
+            )
+        except Exception as exc:
+            logger.warning("[Nango] revoke-connection failed for %s: %s", tenant_id, exc)
+            return {"revoked": False, "connectionId": None}
+        if isinstance(result, dict):
+            return {
+                "revoked": bool(result.get("revoked")),
+                "connectionId": result.get("connectionId"),
+            }
+        return {"revoked": False, "connectionId": None}
+
     # ---------------------------------------------------------------
     # Proxy fallbacks (used when the Action is not yet toggled on)
     # ---------------------------------------------------------------

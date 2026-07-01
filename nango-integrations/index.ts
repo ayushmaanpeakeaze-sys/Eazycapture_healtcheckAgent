@@ -16,3 +16,4 @@ import './xero/syncs/invoices-full.js';
 import './xero/actions/update-invoice.js';              // Approve/Delete + recode line/tax
 import './xero/actions/update-contact.js';              // defaults / archive
 import './xero/actions/create-credit-note.js';          // old-unpaid write-off
+import './xero/actions/revoke-connection.js';           // per-org disconnect (permanently forget)
