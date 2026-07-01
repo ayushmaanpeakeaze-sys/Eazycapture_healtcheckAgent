@@ -28,7 +28,6 @@ active session org, but still resolves the document.
 from __future__ import annotations
 
 from typing import Optional, Union
-from urllib.parse import quote
 from uuid import UUID
 
 _BASE = "https://go.xero.com"
@@ -83,12 +82,5 @@ def xero_deep_link(
         path = _PATH_SEARCH.format(id=doc_id)
 
     if shortcode:
-        # The redirecturl VALUE contains its own ``?InvoiceID=…`` query. It must
-        # be percent-encoded, otherwise Xero parses that inner ``?``/``=`` as
-        # sibling query params on the org-login URL, drops the document id, and
-        # bounces the user to the "My Xero" org chooser instead of the document.
-        # ``safe="/"`` keeps the path slashes literal but encodes ``?`` → %3F and
-        # ``=`` → %3D so the whole path survives as one redirecturl value.
-        redirect = quote(path, safe="/")
-        return f"{_BASE_ORGLOGIN}?shortcode={shortcode}&redirecturl={redirect}"
+        return f"{_BASE_ORGLOGIN}?shortcode={shortcode}&redirecturl={path}"
     return f"{_BASE}{path}"

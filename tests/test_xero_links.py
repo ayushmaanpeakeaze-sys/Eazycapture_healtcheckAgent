@@ -1,7 +1,6 @@
-"""Xero deep-links: the org-login wrapper's ``redirecturl`` value carries its
-own ``?InvoiceID=…`` query, so it MUST be percent-encoded — otherwise Xero
-parses the inner ``?``/``=`` as sibling params, drops the document id, and
-bounces the user to the "My Xero" org chooser instead of the document.
+"""Xero deep-links: the org-login ``redirecturl`` is passed RAW (per Xero's own
+docs). Encoding the inner ``?`` to ``%3F`` breaks the redirect and bounces the
+user to the "My Xero" org chooser.
 """
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -17,14 +16,12 @@ def _redirect_target(url: str) -> str:
     return unquote(qs["redirecturl"][0])
 
 
-def test_bill_link_encodes_inner_query():
+def test_bill_link_keeps_inner_query_raw():
     url = xero_deep_link("ACCPAY", _ID, _SC)
-    # Exactly one raw '?' (the outer query) — the inner one is encoded.
-    assert url.count("?") == 1
-    assert "%3FInvoiceID%3D" in url
-    # Shortcode is preserved literally (incl. the leading '!').
+    assert "%3F" not in url and "%3D" not in url
+    assert f"redirecturl=/AccountsPayable/View.aspx?InvoiceID={_ID}" in url
+    assert url.count("?") == 2
     assert parse_qs(urlparse(url).query)["shortcode"][0] == _SC
-    # And the redirect decodes back to the real bill path.
     assert _redirect_target(url) == f"/AccountsPayable/View.aspx?InvoiceID={_ID}"
 
 
@@ -39,17 +36,14 @@ def test_credit_note_routes_to_credit_notes():
 
 
 def test_bank_transaction_routes_to_bank_view():
-    # Money In / Money Out (RECEIVE / SPEND) → the bank view, also encoded.
     url = xero_deep_link("SPEND", _ID, _SC)
-    assert url.count("?") == 1
+    assert url.count("?") == 2
     assert _redirect_target(url) == f"/Bank/ViewTransaction.aspx?bankTransactionID={_ID}"
 
 
 def test_bank_account_routes_to_reconcile_screen():
-    # "BANK" = a bank ACCOUNT (the Process button) → the reconcile screen —
-    # NOT the account-search fallback that bounced to the "My Xero" chooser.
     url = xero_deep_link("BANK", _ID, _SC)
-    assert url.count("?") == 1
+    assert url.count("?") == 2
     assert _redirect_target(url) == f"/Bank/BankRec.aspx?accountID={_ID}"
     assert "AccountSearch" not in url
 
