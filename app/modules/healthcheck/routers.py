@@ -537,6 +537,7 @@ async def notifications_feed(
     for e in events:
         items.append({
             "kind": "event",
+            "id": str(e.id),               # deletable (alerts are live, no id)
             "type": e.type,
             "severity": e.severity,
             "title": e.title,
@@ -554,6 +555,64 @@ async def notifications_feed(
         if s in counts:
             counts[s] += 1
     return {"counts": counts, "items": items}
+
+
+async def _firm_id_for(db: AsyncSession, user: CurrentUser) -> Optional[UUID]:
+    from app.modules.auth.models import User
+
+    if user.user_id is None:
+        return None
+    u = await db.get(User, user.user_id)
+    return u.firm_id if u is not None else None
+
+
+@router.delete(
+    "/notifications/{notification_id}/",
+    status_code=status.HTTP_200_OK,
+    summary="Delete one notification (event) from the feed.",
+)
+async def delete_notification(
+    notification_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Remove one recorded event from the firm's feed. Health alerts are derived
+    live (no id) and are not deletable here."""
+    from app.modules.healthcheck.models import Notification
+
+    firm_id = await _firm_id_for(db, user)
+    n = await db.get(Notification, notification_id)
+    if n is None or (firm_id is not None and n.firm_id != firm_id):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": "notification not found"},
+        )
+    await db.delete(n)
+    await db.commit()
+    return {"deleted": True, "id": str(notification_id)}
+
+
+@router.delete(
+    "/notifications/",
+    status_code=status.HTTP_200_OK,
+    summary="Clear all notification events for the firm.",
+)
+async def clear_notifications(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Delete every recorded event for the firm (the 'Clear all' button). Live
+    health alerts are unaffected — they re-derive on the next fetch."""
+    from app.modules.healthcheck.models import Notification
+
+    firm_id = await _firm_id_for(db, user)
+    if firm_id is None:
+        return {"deleted": 0}
+    result = await db.execute(
+        delete(Notification).where(Notification.firm_id == firm_id)
+    )
+    await db.commit()
+    return {"deleted": int(result.rowcount or 0)}
 
 
 @router.get(
