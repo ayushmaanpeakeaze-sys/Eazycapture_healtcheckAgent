@@ -13,14 +13,10 @@ from groq import AsyncGroq
 
 from app.core.config import settings
 
-# Groq SDK auto-respects Retry-After on 429s; a few retries let bursts above
-# per-minute token caps recover. Kept modest so that when Groq is UNREACHABLE
-# (connection error / timeout) the audit fails fast and degrades to the
-# deterministic checks, instead of retrying 6× on EVERY LLM pass and dragging a
-# whole audit out to minutes.
+# A few retries absorb 429 bursts; kept modest so an unreachable Groq fails fast
+# and degrades to the deterministic checks rather than dragging out the audit.
 _GROQ_MAX_RETRIES = 2
-# Hard per-request timeout (seconds). Without this the SDK can hang on a stalled
-# connection and block the whole audit. 20s is ample for a batch completion.
+# Hard per-request timeout (seconds) so a stalled connection can't block the audit.
 _GROQ_TIMEOUT_S = 20.0
 
 _client: Optional[AsyncGroq] = None

@@ -98,16 +98,12 @@ class SuggestFixResponse(_StrictBase):
     human_steps: list[str] = Field(default_factory=list)
     rationale: str
     estimated_minutes: int = Field(..., ge=0, le=480)
-    # The Xero document the caller should actually PUT against. Usually the
-    # input transaction's id; for duplicate-void cases it's the sibling
-    # invoice (the newer one, which we want voided to keep the original).
+    # The Xero document to PUT against; for duplicate-void cases it's the
+    # newer sibling invoice, voided to preserve the original.
     target_transaction_id: Optional[str] = None
-    # Structured map of top-level Xero HEADER fields → new value
-    # (e.g. {"Status": "VOIDED"}). Lets Django apply the fix without
-    # parsing xero_action. Null when the fix is line-item-only, needs
-    # a credit note, or requires manual steps.
+    # Map of top-level Xero HEADER fields → new value (e.g. {"Status": "VOIDED"}).
+    # Null when the fix is line-item-only, needs a credit note, or is manual.
     field_updates: Optional[dict[str, Any]] = None
-    # Structured map of Xero LINE-ITEM fields → new value, applied to
-    # every line on the invoice (e.g. {"AccountCode": "489",
-    # "TaxType": "INPUT"}). Null when the fix is header-only.
+    # Map of Xero LINE-ITEM fields → new value, applied to every line.
+    # Null when the fix is header-only.
     line_item_updates: Optional[dict[str, Any]] = None

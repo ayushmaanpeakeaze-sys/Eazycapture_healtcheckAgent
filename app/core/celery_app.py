@@ -31,16 +31,13 @@ celery_app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    # Safety net: force-kill (and, with acks_late, redeliver) any task that runs
-    # past the hard limit so a stuck upstream call can never wedge a worker slot
-    # indefinitely. The longest real task (a full historical audit) finishes well
-    # under this.
+    # Force-kill (and, with acks_late, redeliver) any task exceeding the hard
+    # limit so a stuck upstream call cannot wedge a worker slot indefinitely.
     task_soft_time_limit=540,
     task_time_limit=600,
     # Daily reconcile: re-enumerate each accountant's Xero orgs to pick up
-    # newly-granted clients and deactivate revoked ones. Requires a Celery
-    # BEAT process running alongside the worker:
-    #   celery -A app.core.celery_app beat
+    # newly-granted clients and deactivate revoked ones. Requires a Celery beat
+    # process alongside the worker: celery -A app.core.celery_app beat
     beat_schedule={
         "reconcile-xero-connections": {
             "task": "healthcheck.reconcile_connections",
@@ -53,9 +50,8 @@ celery_app.conf.update(
             "schedule": crontab(hour=2, minute=30),  # 02:30 UTC daily
         },
         # Nightly Xero auto-sync — incrementally pull each connected org's new /
-        # modified records (If-Modified-Since watermark) into the DB so audits
-        # read fresh data without a live fetch. Runs before the insight snapshot
-        # so KPIs compute off the freshly-synced data.
+        # modified records into the DB. Runs before the insight snapshot so KPIs
+        # compute off the freshly-synced data.
         "nightly-xero-sync": {
             "task": "healthcheck.sync_all_xero",
             "schedule": crontab(hour=2, minute=0),  # 02:00 UTC daily

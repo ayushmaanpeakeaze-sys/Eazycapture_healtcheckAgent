@@ -56,10 +56,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Always allow the usual local dev frontend origins on top of the env-configured
-# production origins, so a developer can point a local frontend at ANY backend
-# (incl. prod) without hitting a CORS wall. Allowing localhost is low-risk — only
-# a browser on the developer's own machine can use it.
+# Allow local dev frontend origins alongside the env-configured production
+# origins; localhost is low-risk since only the developer's own browser can use it.
 _LOCAL_DEV_ORIGINS = (
     "http://localhost:3000", "http://127.0.0.1:3000",
     "http://localhost:5173", "http://127.0.0.1:5173",

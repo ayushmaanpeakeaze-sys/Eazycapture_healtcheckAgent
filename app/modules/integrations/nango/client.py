@@ -35,10 +35,8 @@ class NangoAuthError(RuntimeError):
 _MAX_RATE_LIMIT_RETRIES = 3
 _MAX_RATE_LIMIT_WAIT_S = 30.0
 
-# Default timeout for Nango control-plane / proxy calls. These are quick
-# HTTP round-trips — NOT the long rules-engine batch — so they must NOT
-# inherit the 10-minute HEALTHCHECK_AI_TIMEOUT_MS, which would let a hung
-# Nango call block a webhook request for minutes.
+# Timeout for Nango control-plane / proxy calls. Kept short so a hung
+# Nango call cannot block a webhook request for minutes.
 _NANGO_TIMEOUT_S = 30.0
 
 
@@ -294,9 +292,8 @@ class NangoClient:
         json: Optional[dict[str, Any]] = None,
         content: Optional[bytes] = None,
     ) -> Optional[dict[str, Any]]:
-        # Xero rate-limits per tenant (60/min) and app-wide. On 429 we
-        # honour Retry-After and retry a few times rather than fail-open
-        # to None — which would silently fall back to seed data.
+        # Xero rate-limits per tenant and app-wide. On 429, honour
+        # Retry-After and retry rather than fail-open to None.
         import asyncio
 
         attempts = 0
@@ -330,10 +327,8 @@ class NangoClient:
                     "%s %s %s HTTP %s :: %s",
                     _LOG_TAG, method, url, resp.status_code, resp.text[:200],
                 )
-                # Auth failure (expired/revoked token) on a READ must SURFACE, not
-                # return None — otherwise the audit reads it as "no invoices" and
-                # silently serves stale seed data. Writes (POST actions) keep the
-                # return-None behaviour; their callers already handle a failed call.
+                # Auth failure on a READ must surface, not return None, so the
+                # audit does not misread it as empty data. Writes return None.
                 if method == "GET" and resp.status_code in (401, 403):
                     raise NangoAuthError(
                         f"Xero rejected the request (HTTP {resp.status_code}). "

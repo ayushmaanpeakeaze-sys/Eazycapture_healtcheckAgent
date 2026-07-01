@@ -41,10 +41,9 @@ class Company(Base):
 
     __tablename__ = "company"
     __table_args__ = (
-        # An org belongs to exactly ONE firm — the uniqueness key is
-        # (firm, tenant), NOT (connection, tenant): a reconnect mints a fresh
-        # connection_id but must update the SAME org, not duplicate it. Partial
-        # so seed/demo rows (NULL firm) don't collide.
+        # Uniqueness is (firm, tenant), not (connection, tenant): a reconnect
+        # mints a fresh connection_id but must update the same org. Partial so
+        # seed/demo rows (NULL firm) don't collide.
         Index(
             "uq_company_firm_tenant",
             "firm_id",
@@ -57,9 +56,8 @@ class Company(Base):
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    # The tenant (firm/workspace) that owns this org. Companies are isolated per
-    # firm — a firm only ever sees its own. Nullable for legacy rows (backfilled
-    # to a default firm by the migration); set on every new connect.
+    # The firm that owns this org; companies are isolated per firm. Nullable
+    # for legacy rows (backfilled by migration); set on every new connect.
     firm_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("firm.id", ondelete="CASCADE"),
@@ -74,11 +72,8 @@ class Company(Base):
     # button forces the right tenant context.
     xero_shortcode: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # Per-client audit configuration set on the frontend's Audit
-    # Configuration screen. Shape:
-    #   {"disabled_rules": ["currency_mismatch", ...],
-    #    "ignore_before": "2025-01-01"}
-    # NULL / empty → every check runs, no date floor.
+    # Per-client audit configuration, e.g. {"disabled_rules": [...],
+    # "ignore_before": "2025-01-01"}. NULL/empty → every check runs, no floor.
     audit_config: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True,
     )
@@ -277,10 +272,8 @@ class HealthCheckResult(Base):
 
     __tablename__ = "health_check_result"
     __table_args__ = (
-        # Single-column indexes declared explicitly with the names created in
-        # migration 0001 (short ``ix_hcr_*`` form) — rather than via
-        # ``index=True`` (which would use SQLAlchemy's default long names and
-        # make autogenerate perpetually want to rename them).
+        # Indexes named explicitly to match migration 0001's short ``ix_hcr_*``
+        # form; ``index=True`` would use long names autogenerate keeps renaming.
         Index("ix_hcr_company_id", "company_id"),
         Index("ix_hcr_document_id", "document_id"),
         Index("ix_hcr_ran_at", "ran_at"),

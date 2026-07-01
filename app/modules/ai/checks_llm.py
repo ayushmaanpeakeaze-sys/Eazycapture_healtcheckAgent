@@ -12,8 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
-from decimal import Decimal          # FIX A: explicit, was relying on star-import
-from typing import Optional          # FIX A: explicit
+from decimal import Decimal
+from typing import Optional
 
 from app.core.config import settings
 from app.modules.ai.client import get_groq
@@ -215,10 +215,9 @@ _CAPITAL_REVIEW_SYSTEM_PROMPT = (
 )
 
 _CAPITAL_CHUNK_SIZE = 8
-# The two capital pre-filter gates are per-client (``AuditSettings``):
-#   capital_pre_filter_min (default £300) — lower gate; the LLM decides the real
-#                                           capitalisation threshold above it
-#   low_cost_asset_max     (default £10k) — max for a low_cost_fixed_asset candidate
+# Capital pre-filter gates are per-client (``AuditSettings``): capital_pre_filter_min
+# is the lower gate (LLM decides the real threshold above it); low_cost_asset_max caps
+# a low_cost_fixed_asset candidate.
 
 
 async def _batched_capital_review(
@@ -336,7 +335,7 @@ async def _llm_capital_chunk(
     }
 
     flagged: list[FlaggedIssue] = []
-    for i, (check_type, tx) in enumerate(chunk):   # FIX B: keep check_type
+    for i, (check_type, tx) in enumerate(chunk):
         item = by_id.get(i)
         if not item:
             continue
@@ -350,12 +349,9 @@ async def _llm_capital_chunk(
         if confidence < min_confidence:
             continue
 
-        # FIX B: pool/verdict consistency. A high_expense candidate (already on
-        # an EXPENSE account) can only become capital_item_review; a low_asset
-        # candidate (on a FIXED-ASSET account) can only become
-        # low_cost_fixed_asset. Drop verdicts that contradict the pool — they
-        # are model slips that would produce nonsensical flags. The model's own
-        # `issue_type` field is ignored in favour of this deterministic mapping.
+        # Enforce pool/verdict consistency: high_expense can only become
+        # capital_item_review, low_asset only low_cost_fixed_asset. Contradicting
+        # verdicts are dropped; the model's own `issue_type` is ignored.
         if check_type == "high_expense":
             if verdict != "capitalise":
                 continue
@@ -480,9 +476,8 @@ def _normalize_llm_item(
     if tx.current_account_code and suggested_code == tx.current_account_code.strip():
         return None
 
-    # Direction guard: if the LLM crosses the ACCREC/ACCPAY ledger side, drop.
-    # This is the safety net behind the prompt — never propagate a flag that
-    # would post a sales invoice to an expense code (or vice versa).
+    # Direction guard: drop flags that cross the ACCREC/ACCPAY ledger side,
+    # e.g. posting a sales invoice to an expense code.
     allowed_types = _allowed_account_types_for_doc(tx.type)
     if allowed_types is not None:
         suggested_type = coa_type_lookup.get(suggested_code, "")
@@ -494,8 +489,8 @@ def _normalize_llm_item(
                 ",".join(sorted(allowed_types)),
             )
             return None
-        # If the current code is already on the right side, only let high-
-        # confidence (>=0.9) flags through — keeps the trapped list signal-heavy.
+        # If the current code is already on the right side, only let
+        # high-confidence (>=0.9) flags through.
         current_code = (tx.current_account_code or "").strip()
         current_type = coa_type_lookup.get(current_code, "")
         if current_type in allowed_types and confidence < 0.9:

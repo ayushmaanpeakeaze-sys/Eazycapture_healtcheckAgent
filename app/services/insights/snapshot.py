@@ -44,11 +44,8 @@ async def compute_company_snapshot(
         ),
     )
 
-    # A failed report fetch (Xero connection needs re-auth, transient proxy
-    # error) returns None. Computing on that would silently produce an all-zero
-    # snapshot and overwrite the last good one. Treat a missing P&L — the core
-    # report behind profit + sales — as a failure so the caller keeps the
-    # previous snapshot (marked stale) instead of replacing it with zeros.
+    # A missing P&L (the core report behind profit and sales) means the fetch
+    # failed; raise so the caller keeps the previous snapshot instead of zeros.
     if pnl is None:
         raise RuntimeError(
             "Xero ProfitAndLoss report unavailable — connection may need re-auth"

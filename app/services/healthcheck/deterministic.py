@@ -83,7 +83,7 @@ def _inspect_transaction(
     settings: AuditSettings = DEFAULT_SETTINGS,
 ) -> list[FlaggedIssue]:
     issues: list[FlaggedIssue] = []
-    tax_missing = False          # flag, not a line_no — a header-level (line_no=None) miss still counts
+    tax_missing = False          # header-level (line_no=None) miss still counts
     missing_line: Optional[int] = None
     invalid_code: Optional[str] = None
     invalid_line: Optional[int] = None
@@ -196,8 +196,7 @@ def _check_old_unpaid(
         issue_type="old_unpaid_invoice" if is_sale else "old_unpaid_bill",
         severity="high",
         message=msg[:140],
-        # Age column (computed at audit time with the configured basis)
-        # + outstanding so the frontend renders without any date math.
+        # Age and outstanding so the frontend renders without any date math.
         match_reasons={
             "age_days": age,
             "age_basis": settings.old_unpaid_age_basis,
@@ -240,8 +239,7 @@ def _check_old_unsettled_credit(
         return None
     outstanding = _outstanding_amount(tx)
     age = (today - tx.date).days
-    # Rule: "credit note is at least X days old" (by credit-note date) AND still
-    # has unallocated/unrefunded credit (RemainingCredit > 0).
+    # Flag when the credit note is at least X days old and still has unapplied credit.
     if outstanding <= 0 or age < settings.credit_age_days:
         return None
     is_sale = doc_type == "ACCRECCREDIT"
@@ -266,8 +264,7 @@ def _check_unapproved(
     is_purchase = doc_type in _PURCHASE_DOC_TYPES
     if not (is_sale or is_purchase):
         return None
-    # Rule: "Date of invoice is at least x days old" (by invoice date), default
-    # 0 → flag every unapproved doc. Flag when age >= the configured minimum.
+    # Flag when the invoice is at least the configured minimum days old (default 0).
     age = (today - (tx.posted_date or tx.date)).days
     if age < settings.unapproved_grace_days:
         return None
@@ -286,17 +283,14 @@ def _is_paid(tx: BatchTransaction) -> bool:
     )
 
 
-# Recurring re-prove: a same-(contact, amount) charge entered on its usual
-# cadence is a subscription (LOW review), not a duplicate; one entered much
-# closer than the cadence is a same-period double-entry (a real duplicate).
+# A same-(contact, amount) charge on its usual cadence is a subscription;
+# one entered much sooner than the cadence is a same-period duplicate.
 def _dominant(values: list[Any]) -> Optional[str]:
     cleaned = [str(value).strip() for value in values if value and str(value).strip()]
     return Counter(cleaned).most_common(1)[0][0] if cleaned else None
 
 
-# "No VAT" / "Outside scope" — the tax codes the tax-missing checks treat as
-# MISSING. Deliberately EXCLUDES zero-rated / exempt: those are intentional 0%
-# treatments with a real code, not missing tax.
-# Purchase-side expense accounts that LEGITIMATELY carry no VAT — ignored so we
-# don't false-flag them (matched on account NAME, plus the configurable code
-# ignore-list). Wages, tax payments, depreciation, donations, etc.
+# Tax codes treated as missing by the tax-missing checks; excludes zero-rated
+# and exempt, which are intentional 0% treatments with a real code.
+# Purchase-side expense accounts that legitimately carry no VAT, ignored to
+# avoid false flags; matched on account name plus the configurable code ignore-list.

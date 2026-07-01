@@ -92,9 +92,8 @@ class AuditService:
         audit considers — used by the frontend's Period selector. ``None``
         for both audits everything. Idempotent at the batch level (each call
         gets a fresh ``batch_id``)."""
-        # 1. Company existence — multi-tenant guard already runs at the
-        # route layer, but a second check at the service layer keeps the
-        # service callable from non-HTTP contexts (e.g. a future cron job).
+        # Re-check company existence at the service layer so it stays callable
+        # from non-HTTP contexts, independent of the route-level tenant guard.
         exists = await self.db.execute(
             select(Company.id).where(Company.id == company_id)
         )
@@ -106,10 +105,8 @@ class AuditService:
 
         batch_id = uuid4()
 
-        # 2. Persist the audit_batch row first so a Celery crash before
-        # Redis seed doesn't leave the DB inconsistent. The session is
-        # already inside a transaction (auto-begun by the previous
-        # SELECT); commit explicitly rather than opening a nested one.
+        # Persist the audit_batch row first so a crash before the Redis seed
+        # doesn't leave the DB inconsistent.
         batch = AuditBatch(
             id=batch_id,
             company_id=company_id,
@@ -121,12 +118,11 @@ class AuditService:
         self.db.add(batch)
         await self.db.commit()
 
-        # 3. Seed Redis meta — frontend can poll immediately.
+        # Seed Redis meta so the frontend can poll immediately.
         await self._seed_meta_hash(batch_id, company_id)
 
-        # 4. Enqueue the worker task. Imported inline so importing this
-        # service module doesn't drag in Celery at app boot. Dates are passed
-        # as ISO strings (Celery args must be JSON-serialisable).
+        # Import inline so this module doesn't drag in Celery at app boot.
+        # Dates are passed as ISO strings to keep Celery args JSON-serialisable.
         from app.modules.healthcheck.tasks import historical_audit_task
         historical_audit_task.delay(
             str(batch_id),

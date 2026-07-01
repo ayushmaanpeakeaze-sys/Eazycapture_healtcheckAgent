@@ -162,8 +162,7 @@ _VENDOR_ACCOUNT_MAP = [
     ("amazon", "461"), ("staples", "461"), ("ryman", "461"),
 ]
 
-# Fallback: infer account from the CURRENT (wrong) account code.
-# If a FIXED asset account was used for a bill, suggest the closest expense equivalent.
+# Map a wrongly-used fixed asset account to its closest expense equivalent.
 _FIXED_TO_EXPENSE_MAP = {
     "710": "461",  # Office Equipment FIXED → Office Equipment expense
     "720": "461",  # Computer Equipment FIXED → IT/Computer Equipment expense
@@ -202,10 +201,8 @@ def _deterministic_fix(
         endpoint = "CreditNotes" if is_credit else "Invoices"
         noun = "credit note" if is_credit else "invoice"
         if is_original is None:
-            # Review-tier pair (recurring / weaker match): NOT a confirmed
-            # duplicate, so neither side is "original" and we NEVER suggest a
-            # void — only a side-by-side review. Voiding here would kill a
-            # legitimate (often recurring) document.
+            # Review-tier pair: not a confirmed duplicate, so suggest a
+            # side-by-side review rather than a void.
             other = dup_of_inv or f"the matching {noun}"
             return SuggestFixSuggestion(
                 fix_strategy="review_possible_duplicate",

@@ -51,10 +51,8 @@ _ASSET_ACCOUNT_TYPES = {"FIXEDASSET", "CURRENTASSET", "ASSET"}
 _PURE_EXPENSE_ACCOUNT_TYPES = {"EXPENSE", "OVERHEADS", "DIRECTCOSTS"}
 _CREDIT_DOC_TYPES = {"ACCRECCREDIT", "ACCPAYCREDIT"}
 
-# Whitelist of account-name keywords for capital_item_review. Only accounts
-# whose name contains one of these are eligible — FRS 102 explicitly bars
-# capitalising rent, advertising, entertainment, etc. so an expense >£1000
-# posted to a consumable/recurring account is NOT a capital-review candidate.
+# Whitelist of account-name keywords eligible for capital_item_review; FRS 102
+# bars capitalising rent, advertising, entertainment and other recurring costs.
 _CAPITALIZABLE_NAME_KEYWORDS = {
     "equipment", "machinery", "machine", "furniture", "fixture",
     "vehicle", "fleet", "car", "van", "truck", "tool",
@@ -62,11 +60,8 @@ _CAPITALIZABLE_NAME_KEYWORDS = {
     "leasehold", "capital", "plant", "hardware",
 }
 
-# Account-NAME keywords that mark an account as "vague" — anything coded here is
-# a candidate for the Misallocated-Items check (a material posting sitting in a
-# catch-all account that should go somewhere specific). Matched as substrings on
-# the lowercased account name; per-client codes can be added via
-# ``AuditSettings.misallocated_vague_codes``.
+# Account-name keywords marking an account as "vague" (catch-all), matched as
+# substrings on the lowercased name; feeds the Misallocated-Items check.
 _VAGUE_ACCOUNT_NAME_KEYWORDS = (
     "uncategorised", "uncategorized", "unapplied", "unspecified",
     "general expense", "general expenses", "sundry", "miscellaneous",
@@ -74,14 +69,11 @@ _VAGUE_ACCOUNT_NAME_KEYWORDS = (
 )
 
 # Xero direction: ACCREC/ACCRECCREDIT post to revenue-side accounts,
-# ACCPAY/ACCPAYCREDIT post to expense- or asset-side accounts.
-# Used to drop hallucinated cross-direction category suggestions.
+# ACCPAY/ACCPAYCREDIT to expense- or asset-side accounts.
 _SALES_DOC_TYPES = {"ACCREC", "ACCRECCREDIT"}
 _PURCHASE_DOC_TYPES = {"ACCPAY", "ACCPAYCREDIT"}
-# Bank transactions (Money In / Money Out). RECEIVE is sales-side (money in),
-# SPEND is purchase-side (money out). These feed ONLY the Unexpected-Account /
-# Unexpected-Tax checks (compared vs the contact's default account) — they are
-# deliberately kept OUT of duplicate / ageing / tax-missing checks.
+# Bank transactions: RECEIVE is sales-side (money in), SPEND is purchase-side.
+# These feed only the Unexpected-Account / Unexpected-Tax checks.
 _MONEY_IN_TYPES = {"RECEIVE"}
 _MONEY_OUT_TYPES = {"SPEND"}
 _BANK_TXN_TYPES = _MONEY_IN_TYPES | _MONEY_OUT_TYPES

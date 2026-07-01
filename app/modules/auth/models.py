@@ -55,9 +55,8 @@ class User(Base):
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    # The tenant this user belongs to. Nullable only for legacy rows created
-    # before multi-tenancy (backfilled to a default firm by the migration);
-    # every signup sets it.
+    # The tenant this user belongs to. Nullable only for legacy pre-tenancy
+    # rows (backfilled to a default firm by the migration); every signup sets it.
     firm_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("firm.id", ondelete="CASCADE"),
@@ -70,17 +69,14 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="team_member")
     # invited | active | disabled
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="invited")
-    # Company access mode for team members:
-    #   "all"      → every active company, including future ones (flag-based)
-    #   "selected" → only the companies in user_company_access (default)
-    # Ignored for admins (they always have all).
+    # Team-member access mode: "all" (every active company, including future
+    # ones) or "selected" (only user_company_access rows). Admins always have all.
     company_access_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="selected",
     )
     password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # The accountant's Nango connection (set when they connect Xero). One
-    # connection fans out to many Company rows (one per Xero org). Used by
-    # the daily reconcile to re-enumerate the orgs this user can access.
+    # The accountant's Nango connection (set on Xero connect). One connection
+    # fans out to many Company rows (one per Xero org).
     nango_connection_id: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, index=True,
     )
@@ -92,10 +88,8 @@ class User(Base):
     invited_by: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True,
     )
-    # Delivery status of the most recent email we sent this user, updated by
-    # the email-provider webhook: sent | delivered | bounced | complained |
-    # failed. None = nothing recorded yet. Lets the team list flag a bad
-    # address (e.g. an invite that bounced) without joining notification_log.
+    # Delivery status of the most recent email to this user, set by the
+    # email-provider webhook (sent | delivered | bounced | complained | failed).
     email_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(),

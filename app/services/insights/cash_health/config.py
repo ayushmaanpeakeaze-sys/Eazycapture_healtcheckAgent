@@ -69,10 +69,8 @@ _KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     (SUPPLIERS, ("accounts payable", "trade payable", "trade creditor", "creditor",
                  "unpaid expense", "supplier")),
 ]
-# UK/Xero default chart-of-accounts codes → category. Used only as a FALLBACK
-# after the account NAME (codes are reused for different purposes across orgs —
-# e.g. one org's 855 is "Pension", another's is "Clearing Account"), so the name
-# is trusted first. Only the codes whose UK-default meaning is stable are kept.
+# UK/Xero default chart-of-accounts codes → category, used only as a fallback
+# after the account name (codes are reused for different purposes across orgs).
 _CODE_MAP = {
     "800": SUPPLIERS, "801": SUPPLIERS,
     "814": NET_WAGES,
@@ -81,9 +79,8 @@ _CODE_MAP = {
     "830": CORPORATION_TAX,
 }
 
-# Short, ambiguous tokens are matched on a WORD BOUNDARY so they don't false-hit
-# inside longer words ("vat" in inno-vat-ion, "nic" in tech-nic-ian). Multi-word
-# phrases ("national insurance", "net wage") stay as plain substring matches.
+# Short, ambiguous tokens are matched on a word boundary so they don't false-hit
+# inside longer words ("vat" in innovation, "nic" in technician).
 _WORD_BOUNDARY = {"vat", "gst", "nic", "paye", "payg", "p.a.y.e", "corp tax"}
 
 

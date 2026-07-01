@@ -34,10 +34,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, uuid_pk
 
-# The entities we mirror. The first five sync INCREMENTALLY (custom actions
-# honour If-Modified-Since); the last three are small / watermark-less and
-# full-refresh each sync. Kept here as the single source of truth so the
-# engine, db_read and tests agree.
+# Mirrored entities: the first five sync incrementally; the last three are
+# watermark-less and full-refresh each sync.
 SYNC_ENTITIES: tuple[str, ...] = (
     "invoice",
     "bank_transaction",
@@ -65,12 +63,9 @@ class XeroSyncState(Base):
         nullable=False,
         index=True,
     )
-    # invoice | bank_transaction | credit_note | contact | account | tax_rate |
-    # payment | organisation
     entity: Mapped[str] = mapped_column(String(32), nullable=False)
-    # High-water mark: the max UpdatedDateUTC we've durably stored for this
-    # entity. NULL → never synced (next run is a FULL sync). The next
-    # incremental sync asks Xero for ``UpdatedDateUTC >= watermark − overlap``.
+    # High-water mark: max UpdatedDateUTC durably stored for this entity.
+    # NULL means never synced, so the next run is a full sync.
     watermark_utc: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )
@@ -116,15 +111,14 @@ class XeroDocument(Base):
         nullable=False,
     )
     entity: Mapped[str] = mapped_column(String(32), nullable=False)
-    # Xero's native id for this record: InvoiceID / BankTransactionID /
-    # CreditNoteID / ContactID / AccountID / PaymentID / OrganisationID, or —
-    # for entities Xero gives no id (TaxRate) — a natural key (TaxType).
+    # Xero's native id (e.g. InvoiceID, ContactID), or a natural key
+    # (TaxType) for entities Xero gives no id.
     xero_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    # The complete Xero object exactly as the action/proxy returned it, so the
-    # audit's reshape sees byte-for-byte what the live fetch produced.
+    # The complete Xero object exactly as returned, so the audit's reshape
+    # sees byte-for-byte what the live fetch produced.
     raw_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    # Parsed UpdatedDateUTC (from Xero's /Date(ms+0000)/) — drives the watermark
-    # and lets us prune/order. NULL for watermark-less entities (tax rates).
+    # Parsed UpdatedDateUTC, drives the watermark and ordering.
+    # NULL for watermark-less entities (tax rates).
     updated_date_utc: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )

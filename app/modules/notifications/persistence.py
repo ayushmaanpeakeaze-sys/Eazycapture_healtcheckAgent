@@ -20,12 +20,12 @@ from app.modules.notifications.models import NotificationLog
 
 logger = logging.getLogger("eazycapture.notifications.persistence")
 
-# Map raw provider event names → our normalized status. ``None`` = ignore
-# (transient events like 'deferred'/'processed' shouldn't overwrite status).
+# Map raw provider event names to normalized status. ``None`` = ignore
+# (transient events like 'deferred'/'processed' must not overwrite status).
 _EVENT_MAP: dict[str, Optional[str]] = {
     "delivered": "delivered",
     "delivery": "delivered",
-    "open": "delivered",          # opened ⇒ definitely delivered
+    "open": "delivered",          # an open implies delivery
     "click": "delivered",
     "bounce": "bounced",
     "bounced": "bounced",
@@ -101,10 +101,8 @@ async def apply_delivery_event(
     if not message_id and not email_norm:
         return False
 
-    # Match by provider message id first; fall back to the latest log for
-    # this recipient. The fallback matters because SMTP sends don't give us
-    # a message id at send time, so the row we logged has none — but the
-    # provider's webhook still includes one.
+    # Match by provider message id first; fall back to the latest log for this
+    # recipient, since SMTP sends have no message id at log time but the webhook does.
     row: Optional[NotificationLog] = None
     if message_id:
         row = (
@@ -135,8 +133,7 @@ async def apply_delivery_event(
         target_user_id = row.user_id
         updated = True
 
-    # Flag the user even if no log row exists (e.g. emailed before logging
-    # was added) — match by email address.
+    # Flag the user even when no log row exists, matching by email address.
     user = None
     if target_user_id is not None:
         user = await db.get(User, target_user_id)

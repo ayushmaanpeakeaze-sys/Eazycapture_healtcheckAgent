@@ -70,14 +70,9 @@ async def dispose_engine() -> None:
     await engine.dispose()
 
 
-# ---------------------------------------------------------------------
-# Sync session — used by Celery workers.
-#
-# Celery's prefork model doesn't share asyncio event loops cleanly, so
-# the Celery task body uses a sync SQLAlchemy session against the same
-# Postgres via the psycopg driver. The async engine above stays the
-# canonical path for FastAPI request handlers.
-# ---------------------------------------------------------------------
+# Sync session for Celery workers, whose prefork model doesn't share
+# asyncio event loops cleanly. Uses the psycopg driver against the same
+# Postgres; the async engine above remains canonical for FastAPI.
 
 sync_engine: Engine = create_engine(
     sync_database_url(),

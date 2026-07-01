@@ -11,13 +11,11 @@ class Settings:
     # --- Existing AI service (FastAPI :8001) ---
     GROQ_API_KEY: str
     GROQ_MODEL: str
-    # Separate fast model for per-row insight generation (latency-sensitive).
-    # Defaults to llama-3.1-8b-instant which is ~3x faster than the main model.
+    # Fast model for latency-sensitive per-row insight generation.
     GROQ_INSIGHT_MODEL: str
     REDIS_URL: str
     HEALTHCHECK_AI_ENABLED: bool
-    # When false, the audit SKIPS all LLM passes (category / capital / anomaly)
-    # entirely — purely deterministic, fast, and resilient to Groq being down.
+    # When false, the audit skips all LLM passes and runs purely deterministically.
     LLM_CHECKS_ENABLED: bool
     HEALTHCHECK_AI_TTL_SECONDS: int
     CORS_ALLOWED_ORIGINS: tuple[str, ...]
@@ -27,9 +25,8 @@ class Settings:
     CELERY_BROKER_URL: str
     CELERY_RESULT_BACKEND: str
 
-    # AI FastAPI endpoints — these point at this same process by default
-    # (the rules + LLM service we already expose). Override if the engine
-    # ever runs in a separate container.
+    # AI FastAPI endpoints — default to this same process; override if the
+    # engine runs in a separate container.
     HEALTHCHECK_AI_BASE_URL: str
     HEALTHCHECK_AI_BATCH_URL: str
     HEALTHCHECK_AI_ENRICH_URL: str
@@ -46,32 +43,29 @@ class Settings:
     NANGO_XERO_INTEGRATION_ID: str
     # Cap pagination so a misconfigured connection can't pull forever.
     MAX_NANGO_PAGES: int
-    # Where the audit fetches Xero documents from: "proxy" (live proxy_get, default)
-    # or "action" (deployed custom list-*-full Nango actions — same data, line items
-    # intact). Flip to "action" once the actions are deployed + verified.
+    # Source for Xero documents: "proxy" (live proxy_get) or "action"
+    # (deployed custom list-*-full Nango actions, line items intact).
     AUDIT_SOURCE: str
 
-    # Deployment environment: development | staging | production.
-    # In production the app refuses to boot with insecure settings
-    # (see assert_safe_for_environment below).
+    # Deployment environment: development | staging | production. In production
+    # the app refuses to boot with insecure settings (see assert_safe_for_environment).
     APP_ENV: str
 
-    # Auth — empty = demo mode (no JWT check). Set AUTH_DISABLED=true to
-    # force the open demo path even if a JWT secret is present.
+    # Auth — empty JWT_SECRET = demo mode. Set AUTH_DISABLED=true to force the
+    # open demo path even when a JWT secret is present.
     AUTH_DISABLED: bool
     JWT_SECRET: str
     JWT_ALGORITHM: str
     JWT_TTL_HOURS: int
 
-    # Login brute-force protection: lock an account after this many failed
-    # attempts within the window. Counts FAILURES only; a success resets.
+    # Brute-force protection: lock an account after this many failures within
+    # the window. A successful login resets the counter.
     LOGIN_MAX_FAILURES: int
     LOGIN_FAILURE_WINDOW_SECONDS: int
 
     # --- Notifications / email ---
-    # SMTP_HOST empty → email channel reports unconfigured and the
-    # notification service falls back to logging the message (console
-    # channel), so invites still work locally without creds.
+    # Empty SMTP_HOST → email channel is unconfigured and the notification
+    # service falls back to logging the message (console channel).
     SMTP_HOST: str
     SMTP_PORT: int
     SMTP_USERNAME: str
@@ -80,14 +74,12 @@ class Settings:
     SMTP_STARTTLS: bool   # True for port 587 (default), False for SSL
     SMTP_SSL: bool        # True for implicit SSL on port 465
     # Resend (HTTP email API) — sends over HTTPS, works where outbound SMTP is
-    # blocked (e.g. Railway). Fallback once Mailgun is the primary provider.
+    # blocked. Used as a fallback behind Mailgun.
     RESEND_API_KEY: str
     RESEND_FROM: str
-    # Mailgun (HTTP email API) — the firm's PRIMARY/default email provider for
-    # invites + signup OTPs. Sends over HTTPS and is auto-picked first whenever
-    # configured. The Messages endpoint authenticates with the (sending) API key
-    # over HTTP Basic ('api:<key>'); region is set by the base URL (EU vs US).
-    # All values come from APP_MAILGUN_* env vars.
+    # Mailgun (HTTP email API) — primary provider for invites + signup OTPs,
+    # auto-selected first when configured. Authenticates via HTTP Basic
+    # ('api:<key>'); region is set by the base URL. Values from APP_MAILGUN_* env vars.
     MAILGUN_API_KEY: str
     MAILGUN_SENDING_API_KEY: str
     MAILGUN_SENDING_DOMAIN: str
@@ -95,23 +87,19 @@ class Settings:
     MAILGUN_FROM: str  # blank → "<APP_NAME> <noreply@<sending-domain>>"
     # HMAC key Mailgun signs delivery/bounce webhooks with (verified in webhooks.py).
     MAILGUN_WEBHOOK_SIGNING_KEY: str
-    # Optional: a probe recipient for a send self-test, and the inbound
-    # (receiving) domain for future reply handling.
+    # Optional probe recipient for a send self-test, and the inbound domain.
     MAILGUN_PROBE_TO: str
     MAILGUN_INBOUND_DOMAIN: str
-    # Used to build the accept-invite link inside the email — point this at
-    # the frontend origin + route that handles invite acceptance.
+    # Frontend origin + route used to build the accept-invite link in emails.
     APP_NAME: str
     APP_BASE_URL: str
     ACCEPT_INVITE_PATH: str
     # Shared secret the email provider sends on delivery/bounce webhooks.
-    # Empty → webhook accepted with a logged warning (dev), matching the
-    # Nango webhook behaviour. Set in production.
+    # Empty → webhook accepted with a logged warning (dev). Set in production.
     EMAIL_WEBHOOK_SECRET: str
     # --- Companies House (Opening Balance Differences check) ---
-    # Free API key from developer.company-information.service.gov.uk.
-    # Empty → the check falls back to manually-entered filed Net Assets
-    # (no auto-fetch). The API is free/public (unlike Xero's gated Finance API).
+    # Empty API key → the check falls back to manually-entered filed Net Assets
+    # (no auto-fetch).
     COMPANIES_HOUSE_API_KEY: str
     COMPANIES_HOUSE_BASE_URL: str
     COMPANIES_HOUSE_DOCUMENT_URL: str
@@ -177,9 +165,8 @@ def _load() -> Settings:
             "CELERY_RESULT_BACKEND",
             "redis://:peakeaze-redis@127.0.0.1:6379/2",
         ),
-        # The worker calls these on the API service. Set only HEALTHCHECK_AI_BASE_URL
-        # (the API's URL) and the three endpoints derive from it; each can still be
-        # overridden individually if needed.
+        # Set only HEALTHCHECK_AI_BASE_URL; the endpoints below derive from it
+        # but each can still be overridden individually.
         HEALTHCHECK_AI_BASE_URL=_AI_BASE,
         HEALTHCHECK_AI_BATCH_URL=(
             os.environ.get("HEALTHCHECK_AI_BATCH_URL")
@@ -202,10 +189,8 @@ def _load() -> Settings:
         NANGO_USER_ID=os.environ.get("NANGO_USER_ID", "demo-user"),
         NANGO_XERO_INTEGRATION_ID=os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero"),
         MAX_NANGO_PAGES=int(os.environ.get("MAX_NANGO_PAGES", "10")),
-        # Default to the DB-backed source: when an org has synced data the audit
-        # reads it (complete + fast); it falls back to a live fetch automatically
-        # when nothing is synced yet. Override to "proxy"/"action" only for live
-        # debugging.
+        # Default to the DB-backed source; falls back to a live fetch when an
+        # org has no synced data yet.
         AUDIT_SOURCE=os.environ.get("AUDIT_SOURCE", "db").strip().lower(),
         APP_ENV=os.environ.get("APP_ENV", "development").strip().lower(),
         AUTH_DISABLED=_as_bool(os.environ.get("AUTH_DISABLED", "false")),

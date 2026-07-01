@@ -71,10 +71,8 @@ from app.modules.healthcheck.services.trapped_service import TrappedInvoiceServi
 router = APIRouter(
     prefix="/api/v1/health",
     tags=["healthcheck"],
-    # Auth is applied router-wide. When ``JWT_SECRET`` is empty or
-    # ``AUTH_DISABLED=true``, the dependency returns a synthetic admin
-    # and routes work without an Authorization header. When auth is on,
-    # every route here gates on a valid bearer token.
+    # Auth is applied router-wide; when auth is disabled the dependency
+    # returns a synthetic admin, otherwise every route gates on a bearer token.
     dependencies=[Depends(get_current_user)],
 )
 
@@ -577,9 +575,8 @@ async def sync_status(
     any_synced = any(
         v["last_sync_at"] for v in entities.values()
     )
-    # Explicit in-progress signal so the Refresh button stops the instant a sync
-    # finishes (no timestamp-watching, no multi-minute spin). True while the
-    # refresh-data flag is held OR any entity is mid-fetch.
+    # Explicit in-progress signal: true while the refresh-data flag is held
+    # or any entity is mid-fetch.
     redis = get_redis()
     syncing = bool(await redis.exists(f"sync:active:{company_id}")) or any(
         v["status"] == "in_progress" for v in entities.values()
@@ -1093,10 +1090,8 @@ async def sync_xero_history_status(
     batch_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> AuditStatusResponse:
-    # No company-scope check here on purpose: the batch_id is opaque +
-    # short-TTL, so knowing it is sufficient proof. Adding a company-id
-    # query param would force the frontend to thread tenancy through
-    # what is otherwise a clean polling URL.
+    # No company-scope check here: the batch_id is opaque and short-TTL,
+    # so knowing it is sufficient proof.
     service = AuditService(db)
     try:
         return await service.get_status(batch_id)
@@ -1141,8 +1136,7 @@ async def get_audit_config(
         "settings": AuditSettings.clean_overrides(cfg.get("settings")),
         "settings_defaults": AuditSettings().as_json_dict(),
         # Per-check field metadata so the settings screen renders one section
-        # per check (each field's label/type/help/default), entirely from the
-        # API instead of hardcoding the threshold→check mapping in the UI.
+        # per check, entirely from the API.
         "settings_schema": settings_schema(),
         "groups": groups,
     }
@@ -1378,9 +1372,8 @@ async def health_stats(
     resolved = sum(1 for r in rows if (r.result or {}).get("resolved"))
     dismissed = sum(1 for r in rows if (r.result or {}).get("dismissed"))
 
-    # Split: documents (invoices/bills) vs contacts — contacts are hygiene,
-    # not documents, so they shouldn't inflate the "documents trapped" count
-    # or drag the document-based health score.
+    # Split documents vs contacts: contacts are hygiene, not documents, so
+    # they shouldn't inflate the "documents trapped" count.
     open_contact_issues = sum(
         1 for r in open_rows if (r.document_type or "").upper() == "CONTACT"
     )

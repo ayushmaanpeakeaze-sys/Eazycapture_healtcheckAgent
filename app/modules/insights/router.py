@@ -156,11 +156,8 @@ async def get_snapshot(
 async def refresh_snapshot(
     company_id: UUID = Depends(get_current_company_id),
 ) -> dict:
-    # Mirror the data-sync's ``syncing`` flag — but on its OWN key so the
-    # Insights "Refresh" button is independent of the Refresh-Data sync. Set a
-    # short-lived flag (the task clears it on finish/error; the TTL is a safety
-    # net) so the page can show a spinner until the recompute lands, and a second
-    # tap while one is running is a no-op instead of a duplicate recompute.
+    # Short-lived flag on a dedicated key; the task clears it, the TTL is a
+    # safety net. A second request while one is running is a no-op.
     key = f"insights:refreshing:{company_id}"
     started = await get_redis().set(key, "1", nx=True, ex=300)
     if not started:

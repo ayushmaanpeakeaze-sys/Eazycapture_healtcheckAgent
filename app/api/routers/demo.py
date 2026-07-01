@@ -24,10 +24,8 @@ from app.services.healthcheck import run_batch_health_check
 
 router = APIRouter(tags=["demo"])
 
-# ---------------------------------------------------------------------------
-# Demo invoices — represent documents EazyCapture is about to publish to Xero.
-# Each has at least one deliberate issue so the demo shows real flags.
-# ---------------------------------------------------------------------------
+# Demo invoices representing documents about to be published to Xero.
+# Each has at least one deliberate issue so the demo surfaces real flags.
 
 _TODAY = date.today()
 
@@ -176,9 +174,8 @@ async def run_outbound_demo() -> dict[str, Any]:
     from app.schemas.transaction import ChartOfAccount, TaxRate
     from app.core.redis_client import get_redis
 
-    # Cache the demo result so it's instant and CONSISTENT every run.
-    # The LLM-based wrong_category checks vary / rate-limit between calls;
-    # caching guarantees the demo always shows the same full result set.
+    # Cache the demo result for a consistent response on every run, since the
+    # LLM-based wrong_category checks vary and can rate-limit between calls.
     redis = get_redis()
     cache_key = "demo:run-outbound:v1"
     try:

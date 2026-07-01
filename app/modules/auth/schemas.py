@@ -12,10 +12,8 @@ Role = Literal["admin", "team_member"]
 UserStatus = Literal["invited", "active", "disabled"]
 AccessMode = Literal["all", "selected"]
 
-# Lightweight email format check (no email-validator dependency). Catches
-# malformed input — empty, missing @, no domain dot, spaces. It does NOT
-# (and can't cheaply) verify the domain actually accepts mail, so a
-# valid-format but undeliverable address still sends and may bounce.
+# Lightweight email format check (no email-validator dependency); validates
+# shape only, not deliverability.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -105,11 +103,9 @@ class InviteInfoResponse(BaseModel):
 class InviteRequest(BaseModel):
     email: str = Field(..., max_length=255)
     full_name: Optional[str] = Field(default=None, max_length=255)
-    # "all"      → access every company, including future ones
-    # "selected" → only the company_ids below
+    # "all" → every company including future ones; "selected" → only company_ids.
     access_mode: AccessMode = "selected"
-    # Company UUIDs the new team member can access. Used only when
-    # access_mode == "selected".
+    # Company UUIDs the member can access; used only when access_mode == "selected".
     company_ids: list[UUID] = Field(default_factory=list)
 
     @field_validator("email")
@@ -125,14 +121,12 @@ class InviteResponse(BaseModel):
     status: UserStatus
     access_mode: AccessMode
     invite_token: str          # frontend builds the accept-invite link from this
-    # Ready-made accept-invite link (APP_BASE_URL + path + token) so the
-    # frontend's "copy link" doesn't have to assemble the URL itself.
+    # Ready-made accept-invite link (APP_BASE_URL + path + token).
     accept_url: Optional[str] = None
     invite_expires_at: datetime
     assigned_company_ids: list[UUID] = Field(default_factory=list)
-    # Delivery outcome of the invite notification. ``email_sent`` is False
-    # (with ``email_channel="console"``) when SMTP isn't configured — the
-    # invite still exists; the link was only logged, not emailed.
+    # Delivery outcome. ``email_sent`` is False (channel "console") when SMTP
+    # isn't configured; the invite still exists and the link was logged.
     email_sent: bool = False
     email_channel: str = "console"
     email_error: Optional[str] = None
@@ -144,8 +138,7 @@ class RemoveResponse(BaseModel):
 
 
 class AssignCompaniesRequest(BaseModel):
-    # "all"      → access every company, including future ones
-    # "selected" → only the company_ids below
+    # "all" → every company including future ones; "selected" → only company_ids.
     access_mode: AccessMode = "selected"
     company_ids: list[UUID] = Field(default_factory=list)
 
@@ -160,7 +153,7 @@ class UserSummary(_Base):
     created_at: datetime
     assigned_company_ids: list[UUID] = Field(default_factory=list)
     # Last email delivery status: sent | delivered | bounced | complained |
-    # failed | None. UI shows a on bounced/complained (bad address).
+    # failed | None. UI flags bounced/complained as a bad address.
     email_status: Optional[str] = None
 
 

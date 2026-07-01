@@ -79,10 +79,8 @@ def _find_duplicate_bills(
     manufacture a cross-contact "duplicate". ``contact_alias`` is accepted for
     call-site compatibility but intentionally ignored.
     """
-    # Block by (real ContactID, document family) — never pair a sale with a bill,
-    # an invoice with a credit note, or two DIFFERENT contact records. Unlike the
-    # other checks we do NOT canonicalise through the contact alias here: only
-    # Xero's own ContactID groups invoices together.
+    # Block by (real ContactID, document family); the contact alias is never
+    # applied here, so only Xero's own ContactID groups invoices together.
     by_group: dict[tuple[str, str], list[BatchTransaction]] = defaultdict(list)
     for tx in transactions:
         doc_type = (tx.type or "").strip().upper()
@@ -130,17 +128,14 @@ def _find_duplicate_bills(
                 ref_match = _ref_match(a, b)
                 ra, rb = (a.reference or "").strip(), (b.reference or "").strip()
                 same_reference = bool(ra and rb and ra == rb)
-                # The document's IDENTIFYING number: the Xero invoice number for
-                # SALES; the supplier REFERENCE for PURCHASES (bills carry no
-                # invoice number — the reference IS the bill number). ``diff_id``
-                # = "two different documents" → the 0.95 same-day / 0.70 gap case.
+                # Identifying number: the invoice number for sales, the supplier
+                # reference for purchases. ``diff_id`` means two different documents.
                 if is_purchase:
                     diff_id = bool(ra and rb and ra != rb)
                 else:
                     diff_id = bool(num_a and num_b and num_a != num_b)
-                # Reference gate: only SALES drop on a conflicting secondary
-                # reference. Bills use the reference AS their number (scored in the
-                # waterfall below), so the gate must not drop different-ref bills.
+                # Only sales drop on a conflicting secondary reference; bills use
+                # the reference as their number and are scored in the waterfall.
                 if (settings.duplicate_require_exact_reference and not is_purchase
                         and ref_match == "different" and not same_invoice_number):
                     continue
@@ -156,10 +151,8 @@ def _find_duplicate_bills(
                         else (days_apart >= _RECUR_PAIR_GAP)
 
                 # --- confidence + tier (rule waterfall) -------------------
-                # Strongest signal = same identifying number. For SALES that's the
-                # (unique) invoice number → 1.0 even across dates. For BILLS it's
-                # the supplier reference → 1.0, BUT only after the recurring check
-                # (subscriptions reuse the same reference each period).
+                # Strongest signal is the same identifying number: the invoice
+                # number for sales, or the supplier reference for bills.
                 if same_invoice_number:
                     confidence, tier = 1.0, "high"
                 elif recurring:
@@ -178,10 +171,8 @@ def _find_duplicate_bills(
                 if confidence < settings.duplicate_min_confidence:
                     continue
 
-                # "Could be 2 distinct documents" only makes sense when the
-                # identifying numbers/references DIFFER AND there's a DATE GAP.
-                # Same-day different numbers is just a re-entry (confident
-                # duplicate), so no note there. Also suppressed for recurring.
+                # "Could be 2 distinct documents" only applies when the identifying
+                # numbers differ and there is a date gap; suppressed for recurring.
                 distinct_docs_possible = diff_id and days_apart > 0 and not recurring
                 # Grouped by the real ContactID, so a pair always shares one
                 # contact — cross-contact pairing is no longer possible by design.

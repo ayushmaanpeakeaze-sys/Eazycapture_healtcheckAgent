@@ -98,9 +98,8 @@ async def enrich_row_sync(
             json.dumps(record.model_dump(mode="json")),
             ex=settings.HEALTHCHECK_AI_TTL_SECONDS,
         )
-        # Keep the batch progress counter consistent so Django's
-        # "X of Y enriched" doesn't go stale when a row gets ahead of
-        # the background batch.
+        # Keep the batch progress counter consistent when a row gets
+        # ahead of the background batch.
         if batch_id:
             await redis.hincrby(
                 f"{_BATCH_HASH_PREFIX}:{batch_id}",
@@ -117,15 +116,13 @@ async def enrich_row_sync(
 
 async def _run_enrichment(req: EnrichAuditRequest) -> None:
     # Initialise the progress counter immediately so Django can poll
-    # "ai_enriched_count" and "ai_enriched_total" from the moment the
-    # background task starts — no race where the hash is empty.
+    # ai_enriched_count/ai_enriched_total with no empty-hash race.
     try:
         await _init_progress(req)
     except Exception:
         logger.exception("init_progress failed for batch=%s", req.batch_id)
-    # Summary and per-row enrichment run in parallel: a stalled row chunk
-    # no longer blocks the summary from landing, and a summary failure
-    # doesn't lose the row writes.
+    # Summary and per-row enrichment run in parallel so neither blocks
+    # or loses the other on failure.
     results = await asyncio.gather(
         _enrich_rows(req),
         _write_summary(req),
@@ -169,9 +166,8 @@ async def _enrich_rows(req: EnrichAuditRequest) -> None:
             records = await _classify_chunk(chunk)
         for row, record in zip(chunk, records):
             if record is None:
-                # Row enrichment failed (LLM dropped this id / rate-limit
-                # etc). Don't bump the counter — absence signals to Django
-                # to fall back to the rule-based message for this row.
+                # Row enrichment failed; leave the counter so absence
+                # signals Django to use the rule-based message.
                 logger.warning(
                     "enrich-audit: no AI record for row=%s in batch=%s",
                     row.transaction_id, req.batch_id,
@@ -407,10 +403,8 @@ async def suggest_fix(req: SuggestFixRequest) -> SuggestFixResponse:
     extra = tx.model_dump(
         exclude={"transaction_id", "document_type", "rule_id", "messages", "result"}
     )
-    # Surface the high-value structured fields the LLM needs to make the
-    # right call: status (drives PAID-void avoidance) + duplicate-pair
-    # metadata (drives target_transaction_id selection). Pulled from any
-    # of result / extra fields since Django sends them inconsistently.
+    # Surface the structured fields the LLM needs: status (PAID-void
+    # avoidance) and duplicate-pair metadata (target_transaction_id).
     status = _pull(["status", "Status"], tx.result, extra)
     dup_of = _pull(
         ["duplicate_of_transaction_id", "DuplicateOfTransactionId"],
@@ -503,9 +497,8 @@ async def suggest_fix(req: SuggestFixRequest) -> SuggestFixResponse:
         data.get("line_item_updates"), _ALLOWED_LINE_ITEM_UPDATE_KEYS,
         aliases={"TaxCode": "TaxType"},
     )
-    # Hard enforcement: a manual_only fix MUST NOT carry update payloads,
-    # even if the LLM slipped invented values in. Frontend keys off this
-    # to grey out the one-click auto-fix button.
+    # A manual_only fix must not carry update payloads, even if the LLM
+    # slipped invented values in.
     if strategy == "manual_only":
         field_updates = None
         line_item_updates = None
@@ -521,9 +514,8 @@ async def suggest_fix(req: SuggestFixRequest) -> SuggestFixResponse:
     )
 
 
-# Allow-lists matching Django's apply-ai-fix use case. Keep in lockstep —
-# any key outside these gets dropped server-side so a hallucination can't
-# slip a stray field into Xero.
+# Allow-lists matching Django's apply-ai-fix use case; any key outside
+# these is dropped server-side before reaching Xero.
 _ALLOWED_FIELD_UPDATE_KEYS = {
     "Date", "DueDate", "InvoiceNumber", "Reference",
     "Status", "LineAmountTypes",

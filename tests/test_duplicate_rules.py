@@ -345,7 +345,7 @@ def test_different_direction_not_paired():
     assert hits == []
 
 
-# --- Credit notes: type-aware (sir's rule — credit↔credit only) ------------
+# --- Credit notes: type-aware (credit-to-credit only) ------------
 
 def test_duplicate_sales_credit_notes_flagged():
     # Two identical sales credit notes for the same customer → duplicate.

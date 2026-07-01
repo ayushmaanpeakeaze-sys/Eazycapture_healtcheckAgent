@@ -74,8 +74,7 @@ async def create_connect_session(
                 ),
             },
         )
-    # Authenticated user → use their UUID. Demo mode (user_id is None) →
-    # fall back to the configured demo user id.
+    # Authenticated user uses their UUID; demo mode falls back to the demo id.
     if user.user_id is not None:
         end_user_id = str(user.user_id)
     else:
@@ -115,8 +114,7 @@ async def sync_connections(
             content={"detail": "Nango is not configured on this deployment."},
         )
     integration = IntegrationService()
-    # Scope to THIS user's connection: the connect-session stamped it with their
-    # id, so we never adopt another firm's connection.
+    # Scope to this user's connection so we never adopt another firm's.
     end_user_id = str(user.user_id) if user.user_id else None
     try:
         live = await integration.find_live_xero_connection(end_user_id=end_user_id)
@@ -131,8 +129,8 @@ async def sync_connections(
         )
     connection_id, _tenant = live
 
-    # Reuse the EXACT webhook logic: upsert one Company per org, link the user,
-    # set the user's connection, kick off initial sync + auto-audit.
+    # Reuse the webhook logic: upsert one Company per org, link the user,
+    # set the connection, then kick off initial sync and auto-audit.
     creation_payload: dict[str, Any] = {
         "connectionId": connection_id,
         "endUser": {
@@ -173,7 +171,6 @@ async def nango_webhook(
     raw_body = await request.body()
 
     if not _verify_signature(raw_body, x_nango_signature):
-        # Wrong signature is a real attacker signal — refuse explicitly.
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Invalid webhook signature."},
@@ -275,8 +272,8 @@ async def _handle_auth_creation(
         logger.warning("%s auth.creation missing connectionId", _LOG_TAG)
         return
 
-    # The accountant who connected (None in demo — orgs still created,
-    # just not access-linked; the synthetic demo admin sees all anyway).
+    # The accountant who connected (None in demo; orgs still created but not
+    # access-linked, since the demo admin sees all orgs anyway).
     user_id = _user_id_from_payload(payload)
     user: Optional[User] = None
     if user_id is not None:
@@ -302,10 +299,9 @@ async def _handle_auth_creation(
     # The org belongs to the connecting accountant's firm (None in demo).
     firm_id = user.firm_id if user is not None else None
 
-    # Orgs this firm has explicitly removed. The Xero grant re-enumerates EVERY
-    # org the user can reach, so without this a single new connect would
-    # resurrect every org they had deleted/disconnected. Skip them here; the
-    # "re-add" action clears the exclusion so the org can return.
+    # Orgs this firm has explicitly removed. The grant re-enumerates every org
+    # the user can reach, so skip these to avoid resurrecting deleted orgs; the
+    # re-add action clears the exclusion so an org can return.
     excluded: set[str] = set()
     if firm_id is not None:
         excluded = set(
@@ -330,11 +326,10 @@ async def _handle_auth_creation(
             )
             continue
 
-        # Upsert keyed on (firm_id, tenant_id) — a Xero org belongs to exactly
-        # ONE firm, so a RECONNECT (which mints a fresh nango_connection_id) must
-        # UPDATE that org and re-point it at the new connection, NOT create a
-        # duplicate row. Keying the lookup on connection_id was the duplicate-org
-        # bug. Demo orgs have no firm, so they dedupe on (firm IS NULL, tenant).
+        # Upsert keyed on (firm_id, tenant_id): a Xero org belongs to exactly one
+        # firm, so a reconnect updates the org and re-points it at the new
+        # connection rather than creating a duplicate row. Demo orgs have no firm,
+        # so they dedupe on (firm IS NULL, tenant).
         org_filter = [Company.xero_tenant_id == tenant_id]
         if firm_id is not None:
             org_filter.append(Company.firm_id == firm_id)
@@ -354,7 +349,7 @@ async def _handle_auth_creation(
                 is_active=True,
             )
             db.add(company)
-            await db.flush()  # get company.id
+            await db.flush()  # populate company.id
             new_company_ids.append(company.id)
             from app.modules.healthcheck.services.activity import record_event
             await record_event(
@@ -365,10 +360,9 @@ async def _handle_auth_creation(
             )
         else:
             company.name = tenant_name or company.name
-            # Re-point to the latest connection (the whole reason a reconnect
-            # exists) so audits/syncs use the fresh, non-expired connection. Do
-            # NOT force is_active back on — an org the user disconnected stays
-            # disconnected (they re-enable it via the one-click reconnect).
+            # Re-point to the latest connection so audits/syncs use the fresh,
+            # non-expired one. Do not force is_active back on: a disconnected org
+            # stays disconnected until the user re-enables it via reconnect.
             company.nango_connection_id = connection_id
             if company.firm_id is None and firm_id is not None:
                 company.firm_id = firm_id
@@ -389,10 +383,9 @@ async def _handle_auth_creation(
     if user is not None:
         user.nango_connection_id = connection_id
 
-    # Concurrent / duplicate webhook deliveries can both pass the SELECT and
-    # both INSERT the same (connection_id, tenant_id) — the partial unique
-    # index then makes one commit raise. Treat that as an idempotent no-op:
-    # the concurrent winner already created the orgs + dispatched audits.
+    # Concurrent/duplicate deliveries can both insert the same
+    # (connection_id, tenant_id); the partial unique index makes one commit
+    # raise. Treat that as an idempotent no-op — the winner already handled it.
     try:
         await db.commit()
     except IntegrityError:
@@ -404,10 +397,9 @@ async def _handle_auth_creation(
         )
         return
 
-    # Initial sync (the "first sync"): full-pull each new org's Xero data
-    # into the DB so later audits read from our tables. Fire-and-forget; the
-    # first auto-audit below may run before it finishes and simply falls back to
-    # a live fetch until the sync lands — the audit always works either way.
+    # Initial sync: full-pull each new org's Xero data into the DB so later
+    # audits read from our tables. Fire-and-forget; the auto-audit below falls
+    # back to a live fetch until the sync lands, so it works either way.
     from app.modules.integrations.sync.tasks import sync_company_task
 
     for cid in new_company_ids:
@@ -418,8 +410,8 @@ async def _handle_auth_creation(
                 "%s initial sync dispatch failed for company=%s", _LOG_TAG, cid,
             )
 
-    # Auto-audit each newly-created org. dispatch_audit just inserts a batch
-    # row + enqueues the Celery worker (.delay) — fast, non-blocking.
+    # Auto-audit each newly-created org. dispatch_audit inserts a batch row and
+    # enqueues the Celery worker (fast, non-blocking).
     audit = AuditService(db)
     try:
         for cid in new_company_ids:
@@ -432,11 +424,9 @@ async def _handle_auth_creation(
     finally:
         await audit.close()
 
-    # Auto-compute the Insights snapshot for each new org so the dashboard's
-    # bank-reconciliation columns (recent txn / last reconciled / unreconciled)
-    # are populated on connect instead of blank until the next manual/nightly
-    # refresh. Fire-and-forget; reads live Xero and is fully independent of the
-    # sync + audit dispatched above (separate task, separate KPIs).
+    # Auto-compute the Insights snapshot so the dashboard's bank-reconciliation
+    # columns are populated on connect rather than blank until the next refresh.
+    # Fire-and-forget; independent of the sync and audit dispatched above.
     from app.modules.insights.tasks import refresh_company_snapshot
 
     for cid in new_company_ids:
@@ -454,9 +444,7 @@ async def _handle_auth_creation(
     )
 
 
-# NOTE: the old single-org helpers `_set_connection_metadata` and
-# `_extract_xero_tenant_id` were removed with the multi-org rewrite. They
-# stored one tenantId in Nango connection metadata so pre-built Actions
-# could resolve the org — a last-write-wins approach that is wrong for a
-# multi-org connection. All reads now go through the tenant-scoped proxy
-# (which passes nango-proxy-xero-tenant-id per call), so neither is needed.
+# The old single-org helpers `_set_connection_metadata` and
+# `_extract_xero_tenant_id` were removed in the multi-org rewrite: their
+# last-write-wins tenantId in connection metadata is wrong for a multi-org
+# connection. Reads now go through the tenant-scoped proxy instead.

@@ -35,13 +35,8 @@ async def _run_company_sync(
     force_full: bool,
     entities: Optional[list[str]],
 ) -> dict[str, Any]:
-    # Celery runs each task body in its OWN ``asyncio.run()`` event loop. The
-    # shared async engine (``app.core.db.engine``) pools connections bound to the
-    # loop that first opened them; once that loop closes, a pooled connection is
-    # tied to a dead loop and the NEXT task's await on it raises "Event loop is
-    # closed" — wedging the worker after exactly one successful sync. Disposing
-    # the pool at the end of this loop guarantees every task starts on a fresh
-    # pool bound to its own loop.
+    # Dispose the shared async engine pool per task: pooled connections are bound
+    # to the task's asyncio loop, which closes after each ``asyncio.run()``.
     from app.core.db import engine as _async_engine
 
     try:
@@ -98,9 +93,8 @@ def sync_company_task(
         )
         return result
     finally:
-        # Clear the in-progress flag the refresh-data endpoint set, so
-        # /sync-status flips to ``syncing=false`` the instant this finishes (or
-        # errors) — the Refresh button keys off that for exact, instant feedback.
+        # Clear the in-progress flag so /sync-status reports syncing=false once
+        # this task finishes or errors.
         try:
             import redis as _redis_sync
             from app.core.config import settings as _settings

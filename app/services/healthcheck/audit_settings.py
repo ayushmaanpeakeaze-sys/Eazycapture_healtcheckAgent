@@ -79,38 +79,31 @@ def _coerce_field(key: str, value: Any) -> tuple[bool, Any]:
 @dataclass(frozen=True)
 class AuditSettings:
     # --- duplicates ---
-    # 0 (default) = the two documents must share the SAME issue date (sir's rule).
-    # Configurable: bump to 1/2/N to also pair documents that many days apart.
+    # 0 (default) = the two documents must share the same issue date.
+    # Bump to N to also pair documents that many days apart.
     duplicate_days_window: int = 0
-    # Duplicate-invoice toggles (defaults preserve our stricter behaviour; flip
-    # them to widen toward looser matching):
+    # Duplicate-invoice toggles; defaults are stricter, flip to widen matching.
     duplicate_require_same_amount: bool = True       # off → values may differ
-    # ON (default): drop pairs whose references CONFLICT (both present, differ);
-    # exact-ref AND no-ref pairs still flag. OFF → different-ref also surfaces (review).
+    # ON (default): drop pairs whose references conflict (both present, differ);
+    # exact-ref and no-ref pairs still flag. OFF → different-ref also surfaces.
     duplicate_require_exact_reference: bool = True
     duplicate_also_check_paid: bool = False          # default: ≥1 invoice must be unpaid
-    duplicate_min_confidence: float = 0.90           # confidence bar — default 90% shows duplicates precisely
+    duplicate_min_confidence: float = 0.90
     # --- aging ---
-    # Legacy shared threshold — still honoured: seeds the split per-check values
-    # below when those aren't explicitly set, so old configs keep working.
+    # Legacy shared threshold; seeds the split per-check values below when those
+    # aren't explicitly set, so old configs keep working.
     overdue_days: int = 60
-    # Old-unpaid checks. With the default due-date basis (below) these are the
-    # GRACE past the due date before flagging: 1 = flag as soon as it is a day
-    # overdue ("ek din bhi jyada" → overdue). Separate values for customer
-    # invoices vs supplier bills.
+    # Old-unpaid checks: grace days past the due date before flagging (1 = flag
+    # once a day overdue). Separate values for customer invoices vs supplier bills.
     old_unpaid_invoice_days: int = 1     # ACCREC — customer invoices
     old_unpaid_bill_days: int = 1        # ACCPAY — supplier bills
-    # How an invoice/bill's "age" is measured for the old-unpaid checks:
-    #   "due_date" (default) — days PAST the due date (true overdue). The due
-    #                          date already bakes in the 20/30-day terms, so
-    #                          even 1 day past it is flagged.
-    #   "invoice_date"       — days since it was raised (ageing by issue date).
+    # How an invoice/bill's age is measured for the old-unpaid checks:
+    #   "due_date" (default) — days past the due date (true overdue).
+    #   "invoice_date"       — days since it was raised.
     old_unpaid_age_basis: str = "due_date"
-    credit_age_days: int = 60            # separate from overdue (doc fix)
-    # Unapproved invoices/bills (DRAFT or SUBMITTED): the invoice must be at
-    # least this many days old (by invoice date) to show up. The default is 0
-    # → every unapproved document is surfaced immediately; raise it to hide
-    # very recent ones you expect to approve soon.
+    credit_age_days: int = 60
+    # Unapproved invoices/bills (DRAFT or SUBMITTED): minimum age in days (by
+    # invoice date) to surface. Default 0 flags every unapproved document.
     unapproved_grace_days: int = 0
     inactive_days: int = 180
     # Bill-or-Direct-Payment: an unpaid bill is matched with a SPEND bank payment
@@ -127,11 +120,10 @@ class AuditSettings:
     outlier_multiple: Decimal = Decimal("4.0")
     outlier_min_amount: Decimal = Decimal("100")
     # --- duplicate contacts ---
-    # The ONLY duplicate-contacts threshold. Two contact NAMES must be at least
-    # this similar (0..1) to flag a possible duplicate. Everything else
-    # (VAT/email/phone) is enrichment, not part of the match.
+    # Two contact names must be at least this similar (0..1) to flag a possible
+    # duplicate. VAT/email/phone are enrichment, not part of the match.
     dup_contact_name_sim: float = 0.70   # 0..1 (default 70%)
-    ignore_generic_contact: bool = True  # legacy: kept for config back-compat
+    ignore_generic_contact: bool = True  # kept for config back-compat
     # --- capital / asset ---
     # Low-Cost Fixed Asset: a FIXED-asset line BELOW this is too cheap to capitalise.
     low_cost_asset_max: Decimal = Decimal("10000")
@@ -247,13 +239,8 @@ DEFAULT_SETTINGS = AuditSettings()
 # ---------------------------------------------------------------------------
 # Per-check field metadata for the Audit Configuration screen
 # ---------------------------------------------------------------------------
-# ``AuditSettings`` is a flat bag of thresholds; the settings UI needs to know
-# WHICH check each threshold belongs to and HOW to render it. This metadata is
-# that missing link: every tunable field is mapped to its check (``check`` keys
-# match ``rules_registry`` so the screen can pair a field group with that
-# check's on/off toggle) plus how to render it. The result is a settings screen
-# that is 100% backend-driven — one section per check — instead of hardcoding
-# labels/help/grouping in the frontend.
+# Maps every tunable field to its check (``check`` keys match ``rules_registry``)
+# and how to render it, so the settings UI is fully backend-driven.
 #
 # ``type`` tells the frontend which control to draw:
 #   bool      → toggle
@@ -263,9 +250,8 @@ DEFAULT_SETTINGS = AuditSettings()
 #   percent   → 0..1 value rendered as a percentage / slider
 #   list      → comma-separated / tag list of codes, ids or names
 #   select    → one of ``options`` (a dropdown)
-# SettingField now lives in app/checks/base.py (a neutral module) so per-category
-# check modules can define their own fields without a circular import. Re-exported
-# here so existing ``from audit_settings import SettingField`` keeps working.
+# SettingField lives in app/checks/base.py (neutral module) to avoid a circular
+# import; re-exported here for existing ``from audit_settings import SettingField``.
 from app.checks.base import (  # noqa: E402
     SettingField,
     collect_category_setting_fields,

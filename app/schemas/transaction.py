@@ -98,12 +98,10 @@ class BatchTransaction(_StrictBase):
     description: str = Field(..., min_length=1, max_length=1000)
     amount: Decimal = Field(..., max_digits=12, decimal_places=2)
     vendor_name: str = Field(..., min_length=1, max_length=255)
-    # Xero Contact.ContactID — the FOREIGN KEY. Per-contact checks group on
-    # this (not vendor_name). None for seeded/legacy data.
+    # Xero Contact.ContactID; per-contact checks group on this, not vendor_name.
     contact_id: Optional[str] = Field(default=None, max_length=64)
-    # Xero Reference — the SUPPLIER's invoice number (optional → may be absent
-    # in the API). Used for duplicate detection (NOT InvoiceNumber, which is
-    # the org's own number).
+    # Xero Reference (supplier's invoice number). Used for duplicate detection,
+    # not InvoiceNumber, which is the org's own number.
     reference: Optional[str] = Field(default=None, max_length=255)
     tax_code: Optional[str] = Field(default=None, max_length=32)
     current_account_code: Optional[str] = Field(default=None, max_length=32)
@@ -113,20 +111,18 @@ class BatchTransaction(_StrictBase):
     amount_paid: Optional[Decimal] = Field(default=None, max_digits=12, decimal_places=2)
     allocated_amount: Optional[Decimal] = Field(default=None, max_digits=12, decimal_places=2)
     amount_due: Optional[Decimal] = Field(default=None, max_digits=12, decimal_places=2)
-    # Whether the document's payment is BANK MATCHED (reconciled to a bank
-    # statement line in Xero). From Payments.IsReconciled. None = not fetched.
+    # Whether the payment is bank-matched (Payments.IsReconciled). None = not fetched.
     reconciled: Optional[bool] = None
-    # Whether the document has any attachment (PDF/receipt/image) in Xero —
-    # from HasAttachments. None = not fetched. Drives the Undocumented-Bills check.
+    # Whether the document has any attachment (HasAttachments); drives the
+    # Undocumented-Bills check. None = not fetched.
     has_attachments: Optional[bool] = None
-    # Document-level total tax (Xero TotalTax) — for the "tax only" filter.
+    # Document-level total tax (Xero TotalTax) for the "tax only" filter.
     tax_total: Optional[Decimal] = Field(default=None, max_digits=12, decimal_places=2)
     currency_code: Optional[str] = Field(default=None, max_length=8)
     type: Optional[str] = Field(default=None, max_length=32)
     posted_date: Optional[date] = None
     # Every line of the document (each with its own account_code + tax_code).
-    # Empty for seeded/legacy data → checks fall back to the flat tax_code /
-    # current_account_code fields above.
+    # Empty for seeded/legacy data; checks fall back to the flat fields above.
     line_items: list[BatchLineItem] = Field(default_factory=list)
 
 
@@ -142,9 +138,8 @@ class TaxRate(_StrictBase):
     code: Optional[str] = None
     name: Optional[str] = None
     rate: Optional[str] = None
-    # Xero's authoritative direction flags (from /TaxRates): whether this code
-    # may be used on expenses (bills) / revenue (sales). The wrong-direction
-    # check uses these instead of guessing from the code name.
+    # Xero direction flags (from /TaxRates): whether this code applies to
+    # expenses (bills) / revenue (sales). Used by the wrong-direction check.
     can_apply_to_expenses: Optional[bool] = None
     can_apply_to_revenue: Optional[bool] = None
 
@@ -167,39 +162,31 @@ class BatchContext(_StrictBase):
     chart_of_accounts: list[ChartOfAccount] = Field(default_factory=list)
     tax_rates: list[TaxRate] = Field(default_factory=list)
     base_currency: Optional[str] = Field(default=None, max_length=8)
-    # Whether the org is VAT-registered. When explicitly False, the
-    # sales/purchase tax-missing checks are skipped (no point flagging missing
-    # VAT for a non-VAT business). None = unknown → checks run as before.
+    # Whether the org is VAT-registered. When False, the sales/purchase
+    # tax-missing checks are skipped. None = unknown; checks run as before.
     org_is_vat_registered: Optional[bool] = None
     # Per-contact saved default accounts. When present, Unexpected-Account runs
-    # in default-based mode (per the spec); when empty it falls back to the
-    # frequency-outlier heuristic.
+    # in default-based mode; when empty it falls back to the frequency heuristic.
     contact_defaults: list[ContactDefault] = Field(default_factory=list)
-    # Pairs of ContactIDs the Duplicate-Contacts check flagged as likely the
-    # same contact. Lets duplicate detection treat them as one ledger and
-    # catch invoices duplicated ACROSS the two records (Rule 4 — cross-contact).
+    # Pairs of ContactIDs flagged as likely the same contact. Lets duplicate
+    # detection treat them as one ledger and catch cross-contact duplicates.
     duplicate_contact_pairs: list[list[str]] = Field(default_factory=list)
 
 
 class BatchHealthCheckRequest(_StrictBase):
     transactions: list[BatchTransaction] = Field(..., min_length=1, max_length=500)
     context: Optional[BatchContext] = None
-    # When set, blocked pre-checks are persisted to the audit log as
-    # kind="pre_ledger" under this company. Omit for the stateless
-    # inspector use (EazyCapture batch contract) — then nothing is saved.
+    # When set, blocked pre-checks are persisted to the audit log under this
+    # company. Omit for the stateless inspector use; then nothing is saved.
     company_id: Optional[str] = Field(default=None, max_length=64)
-    # "pre_ledger" (default) or "preview" — the audit-log KIND these
-    # persisted rows show under. Only used when company_id is set.
+    # Audit-log kind these persisted rows show under. Only used when company_id is set.
     kind: Optional[str] = Field(default="pre_ledger", max_length=32)
-    # Per-client audit config (from the Audit Configuration screen).
     # Rule keys in ``disabled_rules`` are not run / dropped from results.
     disabled_rules: list[str] = Field(default_factory=list)
     # Transactions dated before this (YYYY-MM-DD) are skipped entirely.
     ignore_before: Optional[date] = None
-    # Per-client tunable thresholds (duplicate window, overdue days, outlier
-    # multiple, etc.). Keys map to ``AuditSettings`` fields; unknown keys are
-    # ignored and missing keys keep defaults, so behaviour is unchanged unless
-    # the client overrides a value.
+    # Per-client tunable thresholds mapping to ``AuditSettings`` fields. Unknown
+    # keys are ignored and missing keys keep defaults.
     settings: Optional[dict] = None
 
 
@@ -214,16 +201,14 @@ class FlaggedIssue(_StrictBase):
     accounts_used: Optional[list[str]] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     reasoning: Optional[str] = None
-    # Duplicate-pair metadata (populated by duplicate_bill). Lets the
-    # frontend render the two rows as a linked pair card and tell the user
-    # which one is the likely original (the older of the two).
+    # Duplicate-pair metadata (populated by duplicate_bill). Lets the frontend
+    # render the two rows as a linked pair and mark the likely original.
     duplicate_of_transaction_id: Optional[str] = None
     duplicate_of_invoice_number: Optional[str] = None
     duplicate_of_date: Optional[date] = None
     this_is_likely_original: Optional[bool] = None
-    # "What matched" — the structured signals behind a duplicate flag, for the
-    # UI chips (same_contact / same_amount / days_apart / reference_match /
-    # confidence / tier). Populated by the duplicate check.
+    # Structured signals behind a duplicate flag (same_contact, same_amount,
+    # days_apart, reference_match, confidence, tier), for the UI chips.
     match_reasons: Optional[dict] = None
 
 

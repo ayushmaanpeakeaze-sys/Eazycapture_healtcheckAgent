@@ -75,18 +75,15 @@ async def run_batch_health_check(
     context = req.context
     allowed_tax_codes = _allowed_tax_codes(context)
     tax_dir = _tax_direction_map(context)
-    # No contact aliasing: every check keys on the real Xero ContactID. Duplicate
-    # contacts are only FLAGGED for the user to Merge/Dismiss in Xero — we never
-    # silently merge two ContactIDs into one ledger for any check. (The check
-    # functions still accept a ``contact_alias`` arg for call-compatibility; we
-    # pass None so they fall back to the raw ContactID.)
+    # Every check keys on the real Xero ContactID; duplicate contacts are only
+    # flagged, never merged. Pass None so checks fall back to the raw ContactID.
     contact_alias = None
     tax_codes_hint = _format_tax_codes_hint(context)
     coa_summary = _coa_summary(context)
     coa_lookup = _coa_lookup(context)
     coa_type_lookup = _coa_type_lookup(context)
-    # Per-contact default accounts → enables default-based Unexpected-Account
-    # (empty map → the check falls back to its frequency heuristic).
+    # Per-contact default accounts enable default-based Unexpected-Account
+    # (empty map falls back to the frequency heuristic).
     contact_defaults_map = {
         cd.contact_id.strip(): {
             "sales": cd.sales_account, "purchase": cd.purchase_account,
@@ -100,25 +97,18 @@ async def run_batch_health_check(
 
     # --- Per-client audit config ---------------------------------------
     disabled = set(req.disabled_rules or [])
-    # Per-client tunable thresholds (duplicate window, overdue days, outlier
-    # multiple, supplier dominance, capital pre-filter, …). Defaults match the
-    # historical constants, so behaviour is unchanged unless the client
-    # overrides a value on the Audit Configuration screen.
+    # Per-client tunable thresholds; defaults match the historical constants.
     settings = AuditSettings.from_config(req.settings)
 
-    # "Ignore transactions before" — drop anything dated earlier so no
-    # check ever sees them.
+    # Drop transactions dated before the ignore-before date so no check sees them.
     transactions = req.transactions
     if req.ignore_before is not None:
         transactions = [t for t in transactions if t.date >= req.ignore_before]
         if not transactions:
             return BatchHealthCheckResponse(flagged=[])
 
-    # Split out bank transactions (Money In / Money Out). They feed ONLY the
-    # Unexpected-Account / Unexpected-Tax checks (vs the contact's default
-    # account). Every OTHER check keeps seeing just invoices/bills/credits —
-    # exactly today's behaviour — so duplicates/ageing/tax-missing never pair or
-    # flag a bank transaction.
+    # Split out bank transactions (Money In / Money Out); most checks keep
+    # seeing only invoices/bills/credits so they never flag a bank transaction.
     bank_transactions = [
         t for t in transactions if (t.type or "").strip().upper() in _BANK_TXN_TYPES
     ]
@@ -132,26 +122,23 @@ async def run_batch_health_check(
         for tx in transactions
     ]
 
-    # Both LLM passes run in parallel — category audit and capital review share
-    # the same concurrency window so total latency = max(both), not sum.
-    # Skip a pass entirely when all the rules it produces are disabled
-    # (saves LLM tokens + latency).
+    # Skip a pass entirely when all the rules it produces are disabled,
+    # saving LLM tokens and latency.
     run_category = "wrong_category" not in disabled
     run_anomaly = "anomaly" not in disabled
     run_amount_outlier = "amount_outlier" not in disabled
-    # Global kill-switch: when LLM checks are disabled (or Groq is unreachable in
-    # this environment), skip every LLM pass so the audit stays fast + fully
-    # deterministic. Amount-outlier still runs as a raw deterministic flag.
+    # Global kill-switch: when LLM checks are disabled, skip every LLM pass so
+    # the audit stays fully deterministic. Amount-outlier still runs as a flag.
     from app.core.config import settings as _app_settings
     if not _app_settings.LLM_CHECKS_ENABLED:
         run_category = run_anomaly = False
 
-    # Amount-outlier candidates (deterministic, cheap). Feed the LLM anomaly
-    # review when enabled; otherwise emit them as raw amount_outlier flags.
+    # Amount-outlier candidates feed the LLM anomaly review when enabled;
+    # otherwise they are emitted as raw amount_outlier flags.
     outlier_candidates = find_amount_outlier_candidates(transactions, contact_alias, settings)
     do_anomaly_llm = run_anomaly and bool(outlier_candidates)
 
-    # All three LLM passes runhaa in parallel — total latency = max, not sum.
+    # All LLM passes run in parallel — total latency = max, not sum.
     category_task = (
         _batched_category_audit(
             transactions, coa_summary, coa_lookup, coa_type_lookup,
@@ -161,19 +148,16 @@ async def run_batch_health_check(
         if (run_category and coa_summary is not None)
         else _noop_issues()
     )
-    # Capital review is now FULLY deterministic (low_cost_fixed_asset +
-    # capital_item_review, both below) — no LLM capital pass.
+    # Capital review is fully deterministic (low_cost_fixed_asset +
+    # capital_item_review, both below); no LLM capital pass.
     capital_task = _noop_issues()
     anomaly_task = (
         _llm_anomaly_review(outlier_candidates, settings)
         if do_anomaly_llm
         else _noop_issues()
     )
-    # return_exceptions=True so a single LLM pass failing — Groq unreachable, a
-    # missing/blank GROQ_API_KEY, a timeout — degrades to its deterministic
-    # fallback instead of sinking the whole audit. The deterministic checks
-    # below MUST always run and return; an LLM enrichment problem is never
-    # allowed to zero the trapped count.
+    # return_exceptions=True so a single failing LLM pass degrades to its
+    # deterministic fallback instead of sinking the whole audit.
     category_issues, capital_issues, anomaly_issues = await asyncio.gather(
         category_task, capital_task, anomaly_task,
         return_exceptions=True,
@@ -204,63 +188,55 @@ async def run_batch_health_check(
     flagged.extend(category_issues)
     flagged.extend(capital_issues)  # always empty — capital is deterministic now
     flagged.extend(anomaly_issues)
-    # Capital checks (both deterministic — account + amount, no LLM). Per the
-    # spec these run over invoices, bills AND bank items (Money In / Money Out), so
-    # they get ``transactions + bank_transactions``:
-    #   • low_cost_fixed_asset  — FIXED-asset line BELOW the capitalisation
-    #     threshold → too cheap to capitalise, should be expensed.
-    #   • capital_item_review   — monitored EXPENSE line ABOVE the threshold →
-    #     too big to expense, may be a capital item. Mirror image of the above.
+    # Capital checks (deterministic) run over invoices, bills and bank items:
+    # low_cost_fixed_asset flags fixed-asset lines too cheap to capitalise;
+    # capital_item_review flags expense lines too big to expense.
     capital_universe = transactions + bank_transactions
     flagged.extend(_find_low_cost_fixed_assets(capital_universe, coa_type_lookup, coa_lookup, settings))
     flagged.extend(_find_capital_items(capital_universe, coa_lookup, coa_type_lookup, settings))
-    # If the LLM anomaly pass didn't run — disabled, no candidates, or it errored
-    # out — fall back to the deterministic amount_outlier flags so outliers are
-    # still surfaced.
+    # If the LLM anomaly pass didn't run, fall back to the deterministic
+    # amount_outlier flags so outliers are still surfaced.
     if (not do_anomaly_llm or anomaly_llm_failed) and run_amount_outlier:
         flagged.extend(amount_outlier_flag(c) for c in outlier_candidates)
-    # Duplicate invoices/bills key on the REAL ContactID — never the contact
-    # alias — so two distinct ContactIDs are always treated as separate parties.
+    # Duplicate invoices/bills key on the real ContactID, so two distinct
+    # ContactIDs are always treated as separate parties.
     flagged.extend(_find_duplicate_bills(transactions, None, settings))
     flagged.extend(_find_opening_balance_differences(transactions, coa_lookup))
     flagged.extend(_find_direction_mismatches(transactions, coa_type_lookup))
-    # Multi-Account Suppliers: checks the contact's bill line items AND
-    # Money-Out bank payments → gets invoices/bills PLUS bank transactions.
+    # Multi-Account Suppliers: checks bill line items and Money-Out bank
+    # payments, so it gets invoices/bills plus bank transactions.
     flagged.extend(_find_multi_account_suppliers(transactions + bank_transactions, coa_lookup, contact_alias, settings))
     flagged.extend(_find_multi_tax_code_suppliers(transactions + bank_transactions, contact_alias, settings))
-    # Unexpected-Account / Unexpected-Tax also check Money In/Out (bank txns) vs
-    # the contact's default — so they get invoices/bills PLUS bank transactions.
+    # Unexpected-Account / Unexpected-Tax also check Money In/Out against the
+    # contact's default, so they get invoices/bills plus bank transactions.
     flagged.extend(_find_unexpected_accounts(transactions + bank_transactions, coa_lookup, contact_defaults_map))
     flagged.extend(_find_unexpected_tax_codes(transactions + bank_transactions, contact_defaults_map))
     # Bill-or-Direct-Payment: unpaid bill matched to a direct SPEND payment.
     flagged.extend(_find_bill_direct_payments(transactions, bank_transactions, settings))
     # Invoice-or-Direct-Deposit: unpaid invoice matched to a direct RECEIVE deposit.
     flagged.extend(_find_invoice_direct_deposits(transactions, bank_transactions, settings))
-    # Misallocated Items: vague-account line over the threshold — checks
-    # bills/invoices AND Money In / Money Out → gets bank transactions too.
+    # Misallocated Items: vague-account line over the threshold; checks
+    # bills/invoices and Money In/Out, so it gets bank transactions too.
     flagged.extend(_find_misallocated_items(transactions + bank_transactions, coa_lookup, settings))
     # Undocumented Bills: supplier bill (or Money Out) with no Xero attachment.
     # Money Out is flagged too; the frontend hides it by default (exclude_bank_items).
     flagged.extend(_find_undocumented_bills(transactions + bank_transactions, settings))
-    # Tax-missing checks only make sense for a VAT-registered org. Skip when the
-    # org is explicitly flagged non-VAT; run as before when unknown (None).
+    # Tax-missing checks only apply to a VAT-registered org. Skip when explicitly
+    # flagged non-VAT; run when unknown (None).
     org_vat = context.org_is_vat_registered if context else None
     if org_vat is not False:
-        # Tax-missing: account-TYPE driven, so they get invoices/bills PLUS
-        # Money In/Out — the account-type filter routes income lines to sales and
-        # expense lines to purchase.
+        # Tax-missing checks are account-type driven, so they get invoices/bills
+        # plus Money In/Out.
         tax_universe = transactions + bank_transactions
         flagged.extend(_find_purchase_tax_missing(tax_universe, coa_lookup, coa_type_lookup, settings))
         flagged.extend(_find_sales_tax_missing(tax_universe, coa_lookup, coa_type_lookup, settings))
     # Wrong-direction VAT (sales code on a bill / purchase code on an invoice).
-    # Include bank items (Money Out / Money In) so the "Show Bank payments too"
-    # toggle can reveal them; the frontend hides them by default.
+    # Include bank items so the "Show Bank payments too" toggle can reveal them.
     flagged.extend(_find_sales_tax_on_bills(transactions + bank_transactions, tax_dir))
     flagged.extend(_find_purchase_tax_on_invoices(transactions + bank_transactions, tax_dir))
 
-    # Drop any flag whose rule the client disabled on the Audit
-    # Configuration screen. (LLM passes were already skipped above; this
-    # also covers the deterministic rules in one place.)
+    # Drop any flag whose rule the client disabled on the Audit Configuration
+    # screen; also covers the deterministic rules in one place.
     if disabled:
         flagged = [f for f in flagged if f.issue_type not in disabled]
 

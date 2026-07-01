@@ -119,9 +119,8 @@ def compute_opening_balance_diffs(
 
 
 # --- Show Late Transactions ---------------------------------------------------
-# When a difference is found, surface transactions DATED in the closed period
-# (accounting date <= period end) but POSTED most recently — the classic cause:
-# entries booked into a finalised/filed period after the fact.
+# Surface transactions dated in the closed period (accounting date <= period end)
+# but posted most recently — entries booked into a filed period after the fact.
 
 # Xero document type → the label shown to the user.
 _TYPE_LABELS: dict[str, str] = {

@@ -259,11 +259,8 @@ class ResolveService:
             document_id=row.document_id,
             document_type=row.document_type,
         )
-        # Only clear the bill from Old Unpaid when the credit note was actually
-        # ALLOCATED (so AmountDue → 0). A real credit note that was created but
-        # NOT allocated leaves the bill still unpaid — it must stay in the list,
-        # otherwise we'd hide a genuinely-unpaid bill (Scenario 1 bug). Stub
-        # responses (no live Xero / demo) skip this gate so demos still resolve.
+        # Only clear the bill when the credit note was ALLOCATED (AmountDue → 0);
+        # a created-but-unallocated note leaves the bill unpaid. Stub responses skip this gate.
         if not xero_response.get("stub"):
             created_cn = xero_response.get("xero_response") or {}
             if not created_cn.get("allocation"):
@@ -445,7 +442,6 @@ class ResolveService:
         """Apply ``dismiss`` / ``snooze`` / ``mark_ok`` to many rows. Each row
         is applied independently; one failure (e.g. a cross-tenant / missing id)
         is recorded and does not abort the rest. Commits once at the end."""
-        # snooze window is computed once so every row in the batch shares it.
         until = datetime.now(timezone.utc) + timedelta(days=days)
         until_iso = until.replace(microsecond=0).isoformat()
         until_ts = int(until.timestamp())

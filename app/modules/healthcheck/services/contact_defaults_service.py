@@ -129,10 +129,8 @@ class ContactDefaultsService:
             missing = missing_contact_defaults(c)
             if missing:
                 missing_count += 1
-            # missing_only → only contacts actually missing a default (no-role
-            # contacts have nothing required, so they fall out here). Show-all
-            # (missing_only=False) → EVERY active contact, so the user can set
-            # defaults on any of them, including ones with no role yet.
+            # missing_only keeps only contacts missing a default; otherwise
+            # every active contact is returned so defaults can be set on any.
             if missing_only and not missing:
                 continue
             rows.append({

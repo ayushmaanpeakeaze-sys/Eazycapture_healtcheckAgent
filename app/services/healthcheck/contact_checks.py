@@ -35,21 +35,15 @@ _COMPANY_SUFFIXES = {
     "llc", "llp", "plc", "co", "company", "corp", "corporation", "the",
 }
 
-# Generic business-TYPE words. These are NOT removed from the name (that would
-# destroy it and over-merge "ABC Agency" with "ABC Trading"). Instead they are
-# treated as STOP WORDS in the similarity score: the distinctive tokens drive
-# the score, the generic words contribute only a small residual. So "RITE
-# Agency" vs "City Agency" scores on 'rite' vs 'city' (~50%), not on the shared
-# " agency" (~82%) — while "ABC Agency" vs "ABC Trading" still differs because
-# their generic words disagree.
+# Generic business-type words kept in the name but treated as stop words in the
+# similarity score, so distinctive tokens drive the match and shared filler does not.
 _BUSINESS_STOPWORDS = {
     "agency", "club", "group", "holdings", "services", "service",
     "solutions", "solution", "consulting", "consultancy", "consultants",
     "partners", "associates", "enterprises", "enterprise", "trading",
     "ventures", "industries",
 }
-# How much the DISTINCTIVE part drives the similarity vs the full name. 0.85 →
-# generic stop-words keep 15% influence (so they nudge, never dominate).
+# Weight of the distinctive part vs the full name; generic stop-words retain 15% influence.
 _DISTINCTIVE_WEIGHT = 0.85
 
 
@@ -90,20 +84,10 @@ def _name_similarity(norm_a: str, norm_b: str) -> float:
 # ---------------------------------------------------------------------------
 # Duplicate-contact scoring (name similarity, VAT-aware confidence)
 # ---------------------------------------------------------------------------
-# The MATCH is driven purely by the contact NAME:
-#   1. normalise the name (strip Ltd/Limited/Pvt/Inc/LLC… + punctuation, lower)
-#   2. similarity % = fuzzy ratio of the two normalised names
-#   3. a pair is a candidate when similarity >= dup_contact_name_sim (default 70%)
-#
-# ``confidence`` then adjusts that name similarity by tax/VAT, because the VAT
-# number is the legal identity:
-#   • same VAT  → boosted  (a shared legal id ≈ the same entity)
-#   • diff VAT  → drastically reduced (likely two different legal entities) — but
-#                 the pair is STILL shown so the user can decide; we never
-#                 hard-drop a strong name match.
-# Everything else (email / phone / bank / address / person / invoices / bills) is
-# ENRICHMENT shown to help the user pick which record to keep — NOT part of the
-# score. ``dup_contact_name_sim`` (default 0.70) is the only gating threshold.
+# The match is driven purely by fuzzy name similarity; a pair is a candidate at
+# >= dup_contact_name_sim (default 70%). ``confidence`` then adjusts that by VAT:
+# same VAT boosts, different VAT reduces, but the pair is still shown. All other
+# fields are enrichment for the user, not part of the score.
 _VAT_MATCH_BOOST = 0.10        # same VAT → nudge confidence up
 _VAT_MISMATCH_FACTOR = 0.40    # different VAT → 95% name match ⇒ ~38% confidence
 
@@ -316,10 +300,8 @@ def _duplicate_contacts(
                 "confidence": round(min(1.0, conf), 2),
                 "name_similarity": round(sim, 2),
                 "vat_status": vat_status,
-                # Enrichment for BOTH sides so a single row renders both lines of
-                # the match (the partner has its own row too, but carrying its
-                # helper here makes each row self-contained — no cross-row lookup,
-                # so a contact in multiple pairs never shows "not in feed").
+                # Enrichment for both sides so each row is self-contained and
+                # renders both lines of the match without a cross-row lookup.
                 "helper": _contact_helper(subject),
                 "partner_helper": _contact_helper(partner),
             }
@@ -333,7 +315,7 @@ def _duplicate_contacts(
         na, nb = norm[ida], norm[idb]
         if not na or not nb:
             continue
-        sim = _name_similarity(na, nb)   # distinctive-driven, generic words down-weighted
+        sim = _name_similarity(na, nb)
         if sim < name_floor:
             continue
         a, b = by_id[ida], by_id[idb]
@@ -359,11 +341,7 @@ def _duplicate_contacts(
 # Rule: contact defaults missing
 # ---------------------------------------------------------------------------
 
-# The four per-contact defaults Xero exposes (read + write):
-#   sales_account    → Contact.SalesDefaultAccountCode
-#   sales_tax        → Contact.AccountsReceivableTaxType
-#   purchases_account→ Contact.PurchasesDefaultAccountCode
-#   purchases_tax    → Contact.AccountsPayableTaxType
+# The four per-contact defaults Xero exposes (read + write).
 _DEFAULT_FIELD_LABELS = {
     "sales_account": "sales default account",
     "sales_tax": "sales default tax",

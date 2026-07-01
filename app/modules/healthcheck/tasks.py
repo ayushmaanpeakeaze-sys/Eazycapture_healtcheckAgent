@@ -181,11 +181,8 @@ def _reshape_xero_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
     )
     description = str(description).strip() or "Invoice"
 
-    # A bill's human identifier is its Reference. Xero stores it in either the
-    # API Reference OR InvoiceNumber depending on how the bill was entered, and
-    # a bill has no separate "invoice number". So for purchase docs, fall back to
-    # InvoiceNumber when Reference is blank — this is what duplicate-matching keys
-    # on and what the UI shows as "Reference" for bills.
+    # A bill's identifier is its Reference, stored in either Reference or
+    # InvoiceNumber; for purchase docs fall back to InvoiceNumber when blank.
     reference_value = _str_or_none(raw.get("Reference"))
     if doc_type in ("ACCPAY", "ACCPAYCREDIT") and not reference_value:
         reference_value = _str_or_none(raw.get("InvoiceNumber"))
@@ -198,8 +195,8 @@ def _reshape_xero_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
         "vendor_name": vendor_name,
         # Contact.ContactID — the foreign key per-contact checks group on.
         "contact_id": (contact.get("ContactID") or "").strip() or None,
-        # Bill identifier (Xero Reference, or InvoiceNumber for bills that put it
-        # there). Duplicate-matching keys on this; the UI labels it "Reference".
+        # Bill identifier (Xero Reference, or InvoiceNumber as fallback);
+        # duplicate-matching keys on this.
         "reference": reference_value,
         "tax_code": _str_or_none(first_line.get("TaxType")),
         "current_account_code": _str_or_none(first_line.get("AccountCode")),
@@ -207,9 +204,8 @@ def _reshape_xero_to_batch(raw: dict[str, Any]) -> Optional[dict[str, Any]]:
         "due_date": _xero_date(raw.get("DueDate")),
         "status": status or None,
         "amount_paid": _str_or_none(raw.get("AmountPaid")),
-        # Invoices/bills carry AmountDue; Xero CREDIT NOTES carry RemainingCredit
-        # (the unallocated/unrefunded balance) and no AmountDue — so a fully
-        # settled credit (RemainingCredit 0) reads as outstanding 0, not its Total.
+        # Invoices/bills carry AmountDue; credit notes carry RemainingCredit
+        # (the unallocated balance) instead.
         "amount_due": _str_or_none(raw.get("AmountDue")) or _str_or_none(raw.get("RemainingCredit")),
         # Bank-matched (reconciled) flag, injected by _pull_xero_documents from
         # the Payments feed. None when payments weren't fetched.
@@ -401,10 +397,8 @@ def _fetch_audit_transactions(
         company.nango_connection_id, company.xero_tenant_id,
     )
 
-    # DB-backed source (AUDIT_SOURCE=db): read the mirrored Xero data from the
-    # synced tables instead of a live fetch. Gated on an initial sync having run;
-    # otherwise fall through to the live path (which self-heals the connection /
-    # seeds), so a never-synced org still works.
+    # DB-backed source (AUDIT_SOURCE=db): read mirrored Xero data from the synced
+    # tables, gated on an initial sync; else fall through to the live path.
     if (
         settings.AUDIT_SOURCE == "db"
         and use_nango
@@ -430,13 +424,11 @@ def _fetch_audit_transactions(
                 )
             )
         except Exception as exc:
-            # SELF-HEAL: the stored connection-id may simply be stale — the Nango
-            # free plan mints a NEW connection-id on every reconnect, leaving the
-            # company pointing at a dead one. Find the live Xero connection and,
-            # if it's different, repoint the company + retry ONCE.
+            # Self-heal a stale connection-id: find the live Xero connection and,
+            # if different, repoint the company and retry once.
             healed = None
-            # Scope the heal to THIS company's firm — never adopt another firm's
-            # live connection. (Unscoped only for firm-less/legacy companies.)
+            # Scope the heal to this company's firm; unscoped only for legacy
+            # firm-less companies.
             heal_eu = None
             if getattr(company, "firm_id", None) is not None:
                 heal_eu = db.execute(
@@ -472,9 +464,8 @@ def _fetch_audit_transactions(
                 except Exception:    # noqa: BLE001 — fall through to the clear error
                     healed = False
             if not healed:
-                # A CONNECTED company whose Xero pull fails must NOT silently fall
-                # back to stale seed data — that hides an expired/revoked
-                # connection. Fail visibly with a clear "reconnect Xero" error.
+                # A connected company whose Xero pull fails must not fall back to
+                # stale seed data; surface a clear "reconnect Xero" error instead.
                 logger.exception(
                     "[SuHe][Audit] Xero pull FAILED for company=%s (self-heal "
                     "didn't recover) — surfacing as a connection error",
@@ -484,8 +475,8 @@ def _fetch_audit_transactions(
                     "Xero connection failed — the link looks expired or revoked. "
                     "Reconnect Xero for this organisation, then run the audit again."
                 ) from exc
-        # Pull succeeded — trust it even if EMPTY (a connected org with no invoices
-        # is genuinely empty, NOT a reason to show seed/demo data).
+        # Pull succeeded — trust it even if empty; a connected org with no
+        # invoices is genuinely empty, not a reason to show seed data.
         shaped = [_reshape_xero_to_batch(raw) for raw in raw_invoices]
         # Bank transactions (Money In/Out), tagged RECEIVE/SPEND — feed only the
         # Unexpected-Account/Tax checks (the orchestrator splits them back out).
@@ -546,10 +537,9 @@ async def _pull_xero_documents(
         integration.fetch_all_bank_transactions(connection_id, tenant_id),
         return_exceptions=True,
     )
-    # Invoices is the CRITICAL fetch. If it failed (e.g. an expired/revoked token
-    # → HTTP 403), the connection is broken — surface it instead of coercing to []
-    # which the caller would mistake for "no invoices" and silently serve stale
-    # seed data. Credit notes / payments / bank txns are secondary and may degrade.
+    # Invoices is the critical fetch: if it failed (e.g. expired token), surface
+    # it rather than coercing to [], which the caller would read as "no invoices"
+    # and serve stale seed data. Other fetches are secondary and may degrade.
     if isinstance(invoices, BaseException):
         raise invoices
     invoices = invoices if isinstance(invoices, list) else []
@@ -771,11 +761,8 @@ def _call_rules_batch(
     # and keeps defaults for missing ones.
     rule_settings = cfg.get("settings") or None
 
-    # Run the rules engine IN-PROCESS. The engine is the pure, framework-free
-    # logic in app/services/healthcheck — importable and runnable right here, so
-    # the worker needs no cross-service HTTP hop to the web (which was fragile:
-    # any restart/networking blip surfaced as a 'Connection refused' and the
-    # audit silently flagged nothing).
+    # Run the rules engine in-process (the pure logic in app/services/healthcheck)
+    # rather than over an HTTP hop to the web service, which was fragile.
     from app.schemas.transaction import BatchHealthCheckRequest
     from app.services.healthcheck.orchestrator import run_batch_health_check
 
@@ -907,10 +894,8 @@ def _persist_trapped(
             # (vendor_name also works, but the id survives a rename).
             "contact_id": (transaction.get("contact_id") or "").strip() or None,
             "invoice_number": (transaction.get("invoice_number") or "").strip() or None,
-            # Human identifier that is NEVER the Xero GUID: the invoice number for
-            # sales invoices, the reference for bills (which have no invoice
-            # number). The UI shows this — labelled "Reference" for bills —
-            # instead of falling back to the transaction id.
+            # Human identifier (never the Xero GUID): invoice number for sales
+            # invoices, reference for bills.
             "display_number": (
                 (transaction.get("invoice_number") or "").strip()
                 or (transaction.get("reference") or "").strip()
@@ -924,22 +909,17 @@ def _persist_trapped(
             "amount_due": transaction.get("amount_due"),            # precise Paid? + Void gate
             "amount_paid": transaction.get("amount_paid"),
             "reconciled": transaction.get("reconciled"),            # bank-matched (IsReconciled)
-            # paid/unpaid + editability (can we update via the Xero API?):
-            #   payment_status  — paid | part_paid | unpaid | settled (bank)
-            #   editable        — False when reconciled / payment / credit allocated
-            #   editable_reason — why not editable (for the "Edit in Xero" hint)
+            # payment_status, editable and editable_reason for the "Edit in Xero" hint.
             **_payment_and_edit_state(transaction),
-            # "Details" column = line-item description (e.g. "Desktop/network
-            # support…"); "Reference" = the Xero Reference field (what
-            # duplicate-matching keys on, e.g. "Monthly Support").
+            # "Details" column = line-item description; "Reference" = the Xero
+            # Reference field.
             "details": (
                 ((transaction.get("line_items") or [{}])[0].get("description")
                  if transaction.get("line_items") else None)
                 or transaction.get("description") or ""
             ).strip()[:200] or None,
-            # "Reference" column = the Xero Reference field (e.g. "DUP-BILL-99",
-            # a PO number) — NOT the line description. For bills this is the
-            # human identifier (bills have no invoice number).
+            # "Reference" column = the Xero Reference field, not the line
+            # description; for bills this is the human identifier.
             "reference": (transaction.get("reference") or "").strip()[:200] or None,
             "xero_reference": (transaction.get("reference") or "").strip() or None,
             "invoice_status": (transaction.get("status") or "").strip().upper() or None,
@@ -960,10 +940,8 @@ def _persist_trapped(
             # something the user resolved / dismissed / accepted.
             if er.get("resolved") or er.get("dismissed") or er.get("marked_ok"):
                 continue
-            # Otherwise RE-SCORE with the latest run so re-runs reflect current
-            # logic + settings (and un-clear an auto-cleared row). For a SCOPED
-            # run (duplicates-only) MERGE: replace only the issue types this run
-            # evaluated, keep the rest (e.g. old-unpaid) so they aren't lost.
+            # Otherwise re-score with the latest run. For a scoped run merge:
+            # replace only the issue types this run evaluated, keep the rest.
             if evaluated_types is None:
                 merged_flagged = items
             else:
@@ -983,9 +961,8 @@ def _persist_trapped(
                 "messages": merged_msgs,
             }
             existing_row.error_msgs = (merged_msgs[:1000] or None)
-            # Bump ``ran_at`` so a re-run reflects a fresh "last checked" time.
-            # ``ran_at`` only auto-fills on INSERT (no onupdate), so without this
-            # a re-scored row keeps its original timestamp and the UI looks stale.
+            # Bump ``ran_at`` for a fresh "last checked" time; it only auto-fills
+            # on insert, so a re-scored row would otherwise keep its old timestamp.
             existing_row.ran_at = datetime.now(timezone.utc)
             new_trapped += 1
             trapped_rows_for_enrich.append({
@@ -1170,10 +1147,8 @@ def historical_audit_task(
                 raise RuntimeError(f"Company {company_id} vanished mid-audit")
             audit_config = dict(company.audit_config or {})
 
-        # "Run duplicates only" button: disable every rule EXCEPT the duplicate
-        # checks (invoices + bills + credit notes) for this run, so no LLM checks
-        # fire (fast) and only the duplicate engine runs. Contact checks + AI
-        # enrichment are skipped below too. The user's saved settings still apply.
+        # "Run duplicates only": disable every rule except the duplicate checks
+        # for this run, so no LLM checks fire and only the duplicate engine runs.
         dup_only = scope == "duplicates"
         if dup_only:
             from app.modules.healthcheck.rules_registry import ALL_RULE_KEYS
@@ -1181,9 +1156,7 @@ def historical_audit_task(
             existing = set(audit_config.get("disabled_rules") or [])
             audit_config["disabled_rules"] = sorted(existing | (ALL_RULE_KEYS - keep))
 
-        # Fetch invoices for EVERY scope (full + duplicates-only). Previously this
-        # lived inside the `if dup_only` block, so a full audit hit an
-        # UnboundLocalError ("transactions not associated with a value").
+        # Fetch invoices for every scope (full + duplicates-only).
         transactions, source = _fetch_audit_transactions(db, company)
 
         # Period filter — keep only transactions in [date_from, date_to]
@@ -1229,11 +1202,8 @@ def historical_audit_task(
                 )
             )
 
-        # Backfill the org shortcode for tenant-scoped Xero deep-links.
-        # The webhook creates Company rows fast (no per-org fetch), so the
-        # shortcode is filled here on the first audit. Without it, deep-links
-        # fall back to an org-agnostic URL that opens the wrong org in a
-        # multi-org Xero session.
+        # Backfill the org shortcode for tenant-scoped Xero deep-links; the
+        # webhook creates Company rows without it, so it's filled on first audit.
         shortcode = org_ctx.get("shortcode")
         if shortcode:
             with SyncSessionLocal() as db:
@@ -1281,11 +1251,8 @@ def historical_audit_task(
                     company_id,
                 )
 
-        # NOTE: Duplicate Contacts is a FLAG-FOR-HUMAN feature only. We never
-        # build a contact alias and never silently merge two ContactIDs — every
-        # check (duplicate invoices AND the others) keys on the real Xero
-        # ContactID. The duplicate-contacts CHECK (run_contact_checks below) just
-        # surfaces the pairs so the user can Merge/Dismiss them in Xero.
+        # Duplicate Contacts is flag-for-human only: no aliasing or merging of
+        # ContactIDs. run_contact_checks just surfaces the pairs for the user.
         if contacts:
             # Contact defaults → default-based Unexpected-Account (per the spec).
             # Only contacts with at least one saved default are sent.
@@ -1397,13 +1364,9 @@ def historical_audit_task(
             )
             if contact_flags:
                 with SyncSessionLocal() as db:
-                    # Group ALL of a contact's flags by ContactID → one row per
-                    # contact carrying every issue (duplicate_contact +
-                    # contact_defaults + inactive_contact) in its ``flagged`` list.
-                    # The frontend groups by each flagged item's issue_type, so the
-                    # contact shows under every relevant check — and no issue type
-                    # clobbers another on the shared ContactID. O(contacts), one
-                    # pass; mirrors how transaction rows hold multiple flags.
+                    # Group all of a contact's flags by ContactID into one row so
+                    # the contact shows under every relevant check without one
+                    # issue type clobbering another on the shared ContactID.
                     flags_by_contact: dict[str, list] = defaultdict(list)
                     for flag in contact_flags:
                         cid = (flag.get("contact_id") or "").strip()
@@ -1451,9 +1414,8 @@ def historical_audit_task(
                             "vendor_name": cflags[0].get("contact_name", ""),
                         }
                         if existing_row is not None:
-                            # RE-SCORE in place so a re-run reflects the latest
-                            # logic/enrichment (e.g. partner_helper) and a fresh
-                            # "last checked" time — and un-clears an auto-cleared row.
+                            # Re-score in place so a re-run reflects the latest
+                            # logic and a fresh "last checked" time.
                             existing_row.result = result_payload
                             existing_row.error_msgs = messages[:1000]
                             existing_row.ran_at = datetime.now(timezone.utc)
@@ -1526,13 +1488,9 @@ def historical_audit_task(
                 )
 
         # --- 7. background pre-warm AI cache ----------------------------
-        # Enrich only the newly-trapped rows so the cache is warm before
-        # the user opens the dashboard. Uses the Celery task directly
-        # (no HTTP roundtrip, no bulk-at-once rate-limit hit).
-        # Skipped on a duplicates-only run (no LLM at all — that's the point)
-        # and whenever LLM checks are disabled: with no AI provider configured
-        # the pre-warm would only loop on connection errors. The deterministic
-        # flags are already persisted; re-enable via LLM_CHECKS_ENABLED.
+        # Enrich only newly-trapped rows so the cache is warm before the user
+        # opens the dashboard. Skipped on a duplicates-only run and whenever LLM
+        # checks are disabled, since the pre-warm would only loop on errors.
         if (
             trapped_rows and not dup_only
             and settings.LLM_CHECKS_ENABLED and settings.GROQ_API_KEY
@@ -1603,12 +1561,8 @@ def prewarm_insights_task(rows_payload: list[dict]) -> dict:
     """
     from app.core.config import settings as _settings
 
-    # No AI provider when LLM checks are disabled — skip rather than loop on
-    # connection errors. The deterministic flags are already persisted, so the
-    # audit is complete without enrichment.
-    # Skip when LLM checks are off OR no Groq key is configured. The missing-key
-    # guard matters most: without a key the enrichment can only loop on connection
-    # errors and hog the worker, which starves syncs — so never start it.
+    # Skip when LLM checks are off or no Groq key is set: without a provider the
+    # enrichment can only loop on connection errors and starve syncs.
     if not (_settings.LLM_CHECKS_ENABLED and _settings.GROQ_API_KEY):
         logger.info(
             "[SuHe][Prewarm] LLM unavailable (disabled or no GROQ_API_KEY) — "
@@ -1768,9 +1722,8 @@ def reenrich_missing_task(
     ``{"row_id": ..., "document_id": ..., "row": {transaction_id,
     rule_ids, messages, transaction, flagged_items}}``.
     """
-    # No AI provider when LLM checks are off OR no Groq key is set — skip rather
-    # than fire a burst of enrich-row calls that would only fail and tie up the
-    # worker. Keeps every refresh / re-enrich path free of Groq.
+    # Skip when LLM checks are off or no Groq key is set, rather than firing a
+    # burst of enrich-row calls that would only fail and tie up the worker.
     if not (settings.LLM_CHECKS_ENABLED and settings.GROQ_API_KEY):
         logger.info(
             "[SuHe][Reenrich] LLM unavailable (disabled or no GROQ_API_KEY) — "
@@ -1870,13 +1823,9 @@ def reconcile_connections_task() -> dict[str, Any]:
             )
             continue
 
-        # CRITICAL: list_tenants is fail-OPEN — it returns [] on any transient
-        # error (timeout, 5xx, 429-exhausted, non-JSON) because the underlying
-        # _send returns None without raising. An empty result is therefore
-        # indistinguishable from "couldn't reach Xero". Treat empty as
-        # "unconfirmed" and SKIP this connection entirely, so a flaky run never
-        # mass-deactivates an accountant's whole client list. (A connection
-        # genuinely covers >=1 org; zero means we failed to confirm.)
+        # list_tenants is fail-open: it returns [] on any transient error, which
+        # is indistinguishable from "couldn't reach Xero". Treat empty as
+        # unconfirmed and skip so a flaky run never mass-deactivates a client list.
         if not live:
             logger.warning(
                 "[SuHe][Reconcile] connection=%s returned no tenants — skipping "
