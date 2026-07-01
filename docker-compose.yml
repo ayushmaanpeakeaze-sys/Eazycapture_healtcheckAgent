@@ -39,12 +39,29 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # Background audits + AI enrichment.
+  # Default queue: Xero sync + audits + insights. LLM enrichment is routed away
+  # to the 'enrich' queue so a slow Groq call never blocks a sync here.
   worker:
     build: .
     env_file: .env
     environment: *app-env
-    command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "app.core.celery_app", "worker", "-Q", "celery", "--loglevel=info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # LLM enrichment only (isolated queue) — pre-warm + re-enrich Groq calls run
+  # here so they can never starve the sync/audit worker above.
+  worker-enrich:
+    build: .
+    env_file: .env
+    environment: *app-env
+    command: ["celery", "-A", "app.core.celery_app", "worker", "-Q", "enrich", "--loglevel=info"]
     depends_on:
       redis:
         condition: service_healthy

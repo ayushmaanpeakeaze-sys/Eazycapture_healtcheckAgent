@@ -52,11 +52,14 @@ revision:
 api:
 	$(UVICORN) app.main:app --host 0.0.0.0 --port $(PORT) --reload
 
-# Celery worker for the healthcheck POC. Uses solo pool on macOS to
-# avoid the fork-vs-objc multiprocessing quirk; switch to prefork in
-# production where it actually helps.
+# Default-queue worker (sync + audits + insights). Solo pool on macOS to
+# avoid the fork-vs-objc quirk; prefork in production.
 worker:
-	$(CELERY) -A app.core.celery_app worker --loglevel=info --pool=solo
+	$(CELERY) -A app.core.celery_app worker -Q celery --loglevel=info --pool=solo
+
+# LLM-enrichment worker (isolated 'enrich' queue) — run alongside `worker`.
+worker-enrich:
+	$(CELERY) -A app.core.celery_app worker -Q enrich --loglevel=info --pool=solo
 
 seed:
 	$(PYTHON) -m app.modules.healthcheck.seed_data

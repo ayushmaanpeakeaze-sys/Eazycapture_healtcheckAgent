@@ -35,6 +35,12 @@ celery_app.conf.update(
     # limit so a stuck upstream call cannot wedge a worker slot indefinitely.
     task_soft_time_limit=540,
     task_time_limit=600,
+    # LLM enrichment runs on its own queue + worker so a slow/looping Groq call
+    # can never starve the sync + audit worker on the default queue.
+    task_routes={
+        "healthcheck.prewarm_insights": {"queue": "enrich"},
+        "healthcheck.reenrich_missing": {"queue": "enrich"},
+    },
     # Daily reconcile: re-enumerate each accountant's Xero orgs to pick up
     # newly-granted clients and deactivate revoked ones. Requires a Celery beat
     # process alongside the worker: celery -A app.core.celery_app beat
