@@ -41,6 +41,7 @@ _PATH_AP = "/AccountsPayable/View.aspx?InvoiceID={id}"        # bill
 _PATH_CN = "/CreditNotes/View.aspx?creditNoteID={id}"         # credit note (sales OR purchase)
 _PATH_CONTACT = "/Contacts/View.aspx?contactID={id}"         # contact
 _PATH_BANK = "/Bank/ViewTransaction.aspx?bankTransactionID={id}"  # money in/out (RECEIVE/SPEND)
+_PATH_BANK_ACCOUNT = "/Bank/BankRec.aspx?accountID={id}"     # bank ACCOUNT reconcile screen
 _PATH_SEARCH = "/Account/AccountSearch.aspx?searchTerm={id}"  # unknown type fallback
 
 
@@ -74,7 +75,9 @@ def xero_deep_link(
         path = _PATH_AP.format(id=doc_id)
     elif kind == "CONTACT":
         path = _PATH_CONTACT.format(id=doc_id)
-    elif kind in {"RECEIVE", "SPEND"}:           # bank transaction (money in/out)
+    elif kind == "BANK":                         # bank ACCOUNT → reconcile screen
+        path = _PATH_BANK_ACCOUNT.format(id=doc_id)
+    elif kind in {"RECEIVE", "SPEND"}:           # a single bank transaction (money in/out)
         path = _PATH_BANK.format(id=doc_id)
     else:
         path = _PATH_SEARCH.format(id=doc_id)

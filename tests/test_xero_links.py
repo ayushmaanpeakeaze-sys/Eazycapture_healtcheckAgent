@@ -45,6 +45,15 @@ def test_bank_transaction_routes_to_bank_view():
     assert _redirect_target(url) == f"/Bank/ViewTransaction.aspx?bankTransactionID={_ID}"
 
 
+def test_bank_account_routes_to_reconcile_screen():
+    # "BANK" = a bank ACCOUNT (the Process button) → the reconcile screen —
+    # NOT the account-search fallback that bounced to the "My Xero" chooser.
+    url = xero_deep_link("BANK", _ID, _SC)
+    assert url.count("?") == 1
+    assert _redirect_target(url) == f"/Bank/BankRec.aspx?accountID={_ID}"
+    assert "AccountSearch" not in url
+
+
 def test_no_shortcode_falls_back_to_direct_path():
     # Without a shortcode there is no redirecturl wrapper, so a raw '?' is fine.
     url = xero_deep_link("ACCREC", _ID, None)
