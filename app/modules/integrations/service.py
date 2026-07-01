@@ -388,7 +388,15 @@ class IntegrationService:
     ) -> Optional[dict[str, Any]]:
         """Xero TrialBalance report — every account's balance. Powers the
         Directors' Loan Account insight + Bank Balance Check. ``as_at_date``
-        (YYYY-MM-DD) pins it to a period end."""
+        (YYYY-MM-DD) pins it to a period end.
+
+        Prefers the ``get-trial-balance`` Nango Action (tenant-scoped, no live
+        proxy); falls back to the proxy when the action isn't deployed yet."""
+        report = await self._nango.action_get_trial_balance(
+            connection_id, tenant_id, as_at_date,
+        )
+        if report is not None:
+            return report
         return await self._nango.fetch_xero_trial_balance(
             connection_id, tenant_id, as_at_date,
         )

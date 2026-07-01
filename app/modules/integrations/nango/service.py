@@ -338,6 +338,35 @@ class NangoService:
         return await self._action_list_full(
             connection_id, "list-credit-notes-full", "creditNotes", tenant_id, page, where, modified_since)
 
+    async def action_get_trial_balance(
+        self,
+        connection_id: str,
+        tenant_id: Optional[str] = None,
+        date: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """``get-trial-balance`` — the Xero TrialBalance report via the Nango
+        Action (tenant-scoped). Returns the single report dict, or None when the
+        action isn't enabled yet / errors — so the caller can fall back to the
+        proxy."""
+        input_data: dict[str, Any] = {}
+        if tenant_id:
+            input_data["tenantId"] = tenant_id
+        if date:
+            input_data["date"] = date
+        try:
+            result = await self._client.trigger_action(
+                connection_id=connection_id,
+                provider_config_key=self._provider_config_key,
+                action="get-trial-balance",
+                input_data=input_data,
+            )
+        except Exception as exc:   # action not deployed / transient — let caller fall back
+            logger.info("[Nango] get-trial-balance action unavailable: %s", exc)
+            return None
+        if isinstance(result, dict) and isinstance(result.get("report"), dict):
+            return result["report"]
+        return None
+
     # ---------------------------------------------------------------
     # Proxy fallbacks (used when the Action is not yet toggled on)
     # ---------------------------------------------------------------

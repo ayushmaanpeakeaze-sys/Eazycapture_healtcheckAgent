@@ -1851,3 +1851,25 @@ async def exclude_unreconciled_account(
     await UnreconciledBankService(db).exclude_account(
         company_id, account_code, excluded=payload.excluded)
     return {"account_code": account_code, "excluded": payload.excluded}
+
+
+@router.get(
+    "/bank-reconciliation-summary/",
+    status_code=status.HTTP_200_OK,
+    summary="Per bank account: Balance in Xero + unreconciled → calculated Statement Balance.",
+)
+async def bank_reconciliation_summary(
+    show_all: bool = False,
+    company_id: UUID = Depends(get_current_company_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bank Reconciliation Summary from the Accounting API. Per bank account:
+    Balance in Xero (Trial Balance) + unreconciled lines = Statement Balance
+    (calculated) — exactly how Xero derives it with no bank feed. The imported
+    bank-feed balance needs Xero's gated Finance API, so
+    ``imported_statement_available`` is false. Only accounts that need
+    reconciling are returned unless ``show_all=true``."""
+    from app.modules.healthcheck.services.bank_reconciliation_service import (
+        BankReconciliationService,
+    )
+    return await BankReconciliationService(db).summary(company_id, show_all=show_all)

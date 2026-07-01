@@ -9,6 +9,7 @@ import './xero/actions/list-bank-transactions-full.js'; // Money In/Out + lines 
 import './xero/actions/list-credit-notes-full.js';      // credit notes + lines + RemainingCredit
 import './xero/actions/list-contacts-full.js';          // contacts + defaults + email + status
 import './xero/actions/list-accounts-full.js';          // chart of accounts (type/taxtype)
+import './xero/actions/get-trial-balance.js';           // trial balance report (Balance in Xero)
 import './xero/syncs/invoices-full.js';
 
 // --- Xero: writes (the "buttons" that fix flagged issues) ---
