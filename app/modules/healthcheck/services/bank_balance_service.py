@@ -23,6 +23,9 @@ from app.modules.healthcheck.services.company_config import CompanyConfigStore
 from app.modules.healthcheck.xero_links import xero_deep_link
 from app.modules.integrations.service import IntegrationService
 from app.services.healthcheck.audit_settings import AuditSettings
+from app.services.healthcheck.bank_reconciliation import (
+    compute_bank_reconciliation_summary,
+)
 from app.services.insights.bank import _parse_trial_balance_balances
 
 logger = logging.getLogger("eazycapture.bank_balance_service")
@@ -76,6 +79,14 @@ class BankBalanceService:
         tb_report = await self._integration.fetch_trial_balance(conn, tenant, period_end)
         gl = _parse_trial_balance_balances(tb_report)   # {account_id: {code, balance}}
 
+        # Auto reconciliation per account: Balance in Xero + unreconciled lines =
+        # Statement Balance (calculated). Same figure Xero derives with no feed.
+        txns = await self._load_bank_txns(company_id, conn, tenant)
+        recon = compute_bank_reconciliation_summary(
+            tb_report, coa, txns, exclude_codes=excluded,
+        )
+        recon_by_id = {a["account_id"]: a for a in recon["accounts"]}
+
         # Note / supporting-doc counts per account for this period end (one
         # grouped query each — no N+1), so the UI can badge "2 notes · 1 doc".
         note_counts, doc_counts = await self._annotation_counts(company_id, period_end)
@@ -89,12 +100,16 @@ class BankBalanceService:
             stmt = _dec((manual.get(code) or {}).get(period_end))
             difference = (stmt - tb_balance) if (stmt is not None and tb_balance is not None) else None
             is_ok = _ok_key(code, period_end) in marked_ok
+            r = recon_by_id.get(acc_id) or {}
+            needs_recon = bool(r.get("needs_reconciliation"))
+            # flag when the manual statement differs OR there are unreconciled items
             flagged = (
-                difference is not None and abs(difference) > tol and not is_ok
+                ((difference is not None and abs(difference) > tol) or needs_recon)
+                and not is_ok
             )
             if not flagged and not show_all:
                 continue
-            if flagged:
+            if flagged and difference is not None:
                 total += abs(difference)
             items.append({
                 "id": code,
@@ -105,6 +120,14 @@ class BankBalanceService:
                 "per_xero_statement": None,   # Finance API gated — see module docstring
                 "per_xero_tb": float(tb_balance) if tb_balance is not None else None,
                 "difference": float(difference) if difference is not None else None,
+                # auto reconciliation (no manual entry needed)
+                "statement_balance_calculated": r.get("statement_balance_calculated"),
+                "unreconciled_lines_total": r.get("unreconciled_lines_total", 0.0),
+                "unreconciled_received": r.get("unreconciled_received", 0.0),
+                "unreconciled_spent": r.get("unreconciled_spent", 0.0),
+                "unreconciled_count": r.get("unreconciled_count", 0),
+                "lines": r.get("lines", []),
+                "needs_reconciliation": needs_recon,
                 "marked_ok": is_ok,
                 "notes_count": note_counts.get(code, 0),
                 "documents_count": doc_counts.get(code, 0),
@@ -112,6 +135,35 @@ class BankBalanceService:
             })
         items.sort(key=lambda r: abs(r["difference"] or 0), reverse=True)
         return {"period_end": period_end, "total_value": float(total), "items": items}
+
+    async def _load_bank_txns(
+        self, company_id: UUID, conn: Optional[str], tenant: Optional[str],
+    ) -> list[dict[str, Any]]:
+        """Bank transactions for the reconciliation figures. Under
+        ``AUDIT_SOURCE=db`` read the synced rows (reliable even when the live
+        token has died); fall back to a live fetch when nothing is synced yet."""
+        from app.core.config import settings as _settings
+
+        if _settings.AUDIT_SOURCE == "db":
+            from sqlalchemy import select as _select
+
+            from app.modules.integrations.sync.models import XeroDocument
+
+            rows = (
+                await self._db.execute(
+                    _select(XeroDocument.raw_json).where(
+                        XeroDocument.company_id == company_id,
+                        XeroDocument.entity == "bank_transaction",
+                    )
+                )
+            ).scalars().all()
+            txns = [r for r in rows if isinstance(r, dict)]
+            if txns:
+                return txns
+
+        if self._integration.is_connected(conn, tenant):
+            return await self._integration.fetch_all_bank_transactions(conn, tenant) or []
+        return []
 
     async def _annotation_counts(
         self, company_id: UUID, period_end: str,

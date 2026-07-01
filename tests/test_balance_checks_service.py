@@ -20,9 +20,12 @@ def _fake_db(company):
     db = MagicMock()
     db.get = AsyncMock(return_value=company)
     db.commit = AsyncMock()
-    # bank-balance counts the per-account notes/docs via db.execute(...).all();
-    # return an empty grouped result so those queries are a no-op in unit tests.
-    _empty = MagicMock(); _empty.all.return_value = []
+    # bank-balance counts the per-account notes/docs via db.execute(...).all(),
+    # and reads synced bank txns via db.execute(...).scalars().all(); return an
+    # empty result for both so those queries are a no-op in unit tests.
+    _empty = MagicMock()
+    _empty.all.return_value = []
+    _empty.scalars.return_value.all.return_value = []
     db.execute = AsyncMock(return_value=_empty)
     return db
 
@@ -114,6 +117,7 @@ def test_bank_balance_manual_statement_vs_tb():
     integ.fetch_chart_of_accounts = AsyncMock(return_value=[
         {"AccountID": "acc090", "Code": "090", "Name": "Business", "Type": "BANK"}])
     integ.fetch_trial_balance = AsyncMock(return_value=_tb("acc090", "93360.82"))
+    integ.is_connected = MagicMock(return_value=False)  # no live bank-txn fetch in unit test
     svc = BankBalanceService(_fake_db(company), integration=integ)
 
     out = asyncio.run(svc.list_differences(uuid4(), "2026-03-31"))
@@ -134,6 +138,7 @@ def test_bank_balance_excluded_account_hidden():
     integ.fetch_chart_of_accounts = AsyncMock(return_value=[
         {"AccountID": "acc090", "Code": "090", "Name": "Business", "Type": "BANK"}])
     integ.fetch_trial_balance = AsyncMock(return_value=_tb("acc090", "93360.82"))
+    integ.is_connected = MagicMock(return_value=False)  # no live bank-txn fetch in unit test
     svc = BankBalanceService(_fake_db(company), integration=integ)
     assert asyncio.run(svc.list_differences(uuid4(), "2026-03-31"))["items"] == []
 
@@ -145,6 +150,7 @@ def test_bank_balance_marked_ok_not_flagged_but_shown_with_all():
     integ.fetch_chart_of_accounts = AsyncMock(return_value=[
         {"AccountID": "acc090", "Code": "090", "Name": "Business", "Type": "BANK"}])
     integ.fetch_trial_balance = AsyncMock(return_value=_tb("acc090", "93360.82"))
+    integ.is_connected = MagicMock(return_value=False)  # no live bank-txn fetch in unit test
     svc = BankBalanceService(_fake_db(company), integration=integ)
     # marked-ok → not flagged → hidden unless show_all, and never in the total
     assert asyncio.run(svc.list_differences(uuid4(), "2026-03-31"))["items"] == []
