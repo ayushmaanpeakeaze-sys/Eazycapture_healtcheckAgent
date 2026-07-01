@@ -21,6 +21,7 @@ from uuid import UUID
 
 from app.modules.healthcheck.services.company_config import CompanyConfigStore
 from app.modules.healthcheck.xero_links import xero_deep_link
+from app.modules.integrations.nango.client import NangoAuthError
 from app.modules.integrations.service import IntegrationService
 from app.services.healthcheck.audit_settings import AuditSettings
 from app.services.healthcheck.bank_reconciliation import (
@@ -66,8 +67,14 @@ class BankBalanceService:
         marked_ok = set(bb.get("marked_ok") or [])
         manual = bb.get("statement") or {}   # {code: {period_end: "value"}}
 
-        # Bank accounts from the chart of accounts.
-        coa = await self._integration.fetch_chart_of_accounts(conn, tenant) or []
+        # Bank accounts (chart of accounts) + GL balances (trial balance). A dead
+        # token surfaces as NangoAuthError; report not-connected, never false "0".
+        try:
+            coa = await self._integration.fetch_chart_of_accounts(conn, tenant) or []
+            tb_report = await self._integration.fetch_trial_balance(conn, tenant, period_end)
+        except NangoAuthError:
+            return {"period_end": period_end, "total_value": 0.0,
+                    "items": [], "connected": False}
         bank_accounts = {
             str(a.get("AccountID")): {
                 "code": (a.get("Code") or "").strip(),
@@ -75,8 +82,6 @@ class BankBalanceService:
             }
             for a in coa if isinstance(a, dict) and a.get("Type") == "BANK"
         }
-        # GL balance per account at the period end.
-        tb_report = await self._integration.fetch_trial_balance(conn, tenant, period_end)
         gl = _parse_trial_balance_balances(tb_report)   # {account_id: {code, balance}}
 
         # Auto reconciliation per account: Balance in Xero + unreconciled lines =
@@ -134,7 +139,8 @@ class BankBalanceService:
                 "process_url": xero_deep_link("BANK", acc_id, shortcode),
             })
         items.sort(key=lambda r: abs(r["difference"] or 0), reverse=True)
-        return {"period_end": period_end, "total_value": float(total), "items": items}
+        return {"period_end": period_end, "total_value": float(total),
+                "items": items, "connected": True}
 
     async def _load_bank_txns(
         self, company_id: UUID, conn: Optional[str], tenant: Optional[str],

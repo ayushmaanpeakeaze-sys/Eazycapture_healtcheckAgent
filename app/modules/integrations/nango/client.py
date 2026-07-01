@@ -327,9 +327,13 @@ class NangoClient:
                     "%s %s %s HTTP %s :: %s",
                     _LOG_TAG, method, url, resp.status_code, resp.text[:200],
                 )
-                # Auth failure on a READ must surface, not return None, so the
-                # audit does not misread it as empty data. Writes return None.
-                if method == "GET" and resp.status_code in (401, 403):
+                # A dead/expired connection on a READ must surface, not return
+                # None, so callers don't misread it as empty data (Nango replies
+                # 401/403, or 400 "Failed to get connection"). Writes return None.
+                if method == "GET" and (
+                    resp.status_code in (401, 403)
+                    or "Failed to get connection" in (resp.text or "")
+                ):
                     raise NangoAuthError(
                         f"Xero rejected the request (HTTP {resp.status_code}). "
                         f"The connection looks expired or revoked."

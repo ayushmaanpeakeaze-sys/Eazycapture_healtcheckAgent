@@ -276,6 +276,28 @@ async def test_send_raises_on_auth_failure_for_reads_only(monkeypatch):
     ) is None
 
 
+async def test_send_raises_on_dead_connection(monkeypatch):
+    """A dead/expired connection replies HTTP 400 'Failed to get connection'; a
+    GET must surface it (not return None) so a live read doesn't look empty."""
+    import app.modules.integrations.nango.client as client_mod
+    from app.modules.integrations.nango.client import NangoAuthError
+
+    class _FakeAsyncClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def request(self, method, url, **k):
+            return httpx.Response(
+                400, text='{"error":{"message":"Failed to get connection"}}',
+                request=httpx.Request(method, url))
+
+    monkeypatch.setattr(client_mod.httpx, "AsyncClient", _FakeAsyncClient)
+    client = NangoClient(secret_key="secret_xxx")
+
+    with pytest.raises(NangoAuthError):
+        await client._send("GET", "http://x/proxy/api.xro/2.0/Contacts", headers={})
+
+
 async def test_action_revoke_connection_triggers_with_tenant(monkeypatch):
     svc = NangoService()
     captured = {}

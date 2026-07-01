@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.healthcheck.models import Company, HealthCheckResult
+from app.modules.integrations.nango.client import NangoAuthError
 from app.modules.integrations.service import IntegrationService
 from app.services.healthcheck.contact_checks import (
     _DEFAULT_FIELD_TO_XERO,
@@ -97,15 +98,19 @@ class ContactDefaultsService:
         contact_defaults trapped row is marked dismissed); pass True for the
         "show dismissed" view. Each row carries ``trapped_row_id`` + ``dismissed``."""
         conn, tenant = await self._connection(company_id)
+        empty = {"connected": False, "contacts": [], "accounts": [],
+                 "tax_rates": [], "total": 0, "missing_count": 0}
         if not self._integration.is_connected(conn, tenant):
-            return {"connected": False, "contacts": [], "accounts": [],
-                    "tax_rates": [], "total": 0, "missing_count": 0}
-
-        contacts, accounts, tax_rates = await asyncio.gather(
-            self._integration.fetch_contacts(conn, tenant),
-            self._integration.fetch_chart_of_accounts(conn, tenant),
-            self._integration.fetch_tax_rates(conn, tenant),
-        )
+            return empty
+        try:
+            contacts, accounts, tax_rates = await asyncio.gather(
+                self._integration.fetch_contacts(conn, tenant),
+                self._integration.fetch_chart_of_accounts(conn, tenant),
+                self._integration.fetch_tax_rates(conn, tenant),
+            )
+        except NangoAuthError:
+            # Dead/expired token: report not-connected instead of a false "0 clean".
+            return empty
         trapped = await self._contact_trapped_map(company_id)
 
         needle = (search or "").strip().lower()

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from app.modules.healthcheck.services.bank_balance_service import BankBalanceService
 from app.modules.healthcheck.services.opening_balance_service import OpeningBalanceService
+from app.modules.integrations.nango.client import NangoAuthError
 
 
 def _fake_db(company):
@@ -168,3 +169,25 @@ def test_bank_balance_write_persists():
     asyncio.run(svc.mark_ok(uuid4(), "090", "2026-03-31", ok=True))
     assert "090|2026-03-31" in company.audit_config["bank_balance"]["marked_ok"]
     db.commit.assert_awaited()
+
+
+def test_bank_balance_dead_connection_reports_not_connected():
+    # A dead token must give connected=False, never a false "no differences".
+    company = _company({"bank_balance": {"statement": {"090": {"2026-03-31": "64749.69"}}}})
+    integ = MagicMock()
+    integ.fetch_chart_of_accounts = AsyncMock(side_effect=NangoAuthError("expired"))
+    integ.fetch_trial_balance = AsyncMock(side_effect=NangoAuthError("expired"))
+    svc = BankBalanceService(_fake_db(company), integration=integ)
+    out = asyncio.run(svc.list_differences(uuid4(), "2026-03-31"))
+    assert out["connected"] is False
+    assert out["items"] == []
+
+
+def test_opening_balance_dead_connection_reports_not_connected():
+    company = _company({"opening_balance": {"filed": {"2023-09-30": "324"}}})
+    integ = MagicMock()
+    integ.fetch_balance_sheet = AsyncMock(side_effect=NangoAuthError("expired"))
+    svc = OpeningBalanceService(_fake_db(company), integration=integ)
+    out = asyncio.run(svc.list_differences(uuid4()))
+    assert out["connected"] is False
+    assert out["items"] == []

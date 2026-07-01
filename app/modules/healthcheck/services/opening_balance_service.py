@@ -27,6 +27,7 @@ from app.modules.integrations.companies_house.service import (
     CompaniesHouseService,
     FiledNetAssets,
 )
+from app.modules.integrations.nango.client import NangoAuthError
 from app.modules.integrations.service import IntegrationService
 from app.services.healthcheck.audit_settings import AuditSettings
 from app.services.healthcheck.opening_balance import (
@@ -90,11 +91,16 @@ class OpeningBalanceService:
                 "registration_number": reg_no,
             }
 
-        # Net Assets per Xero at each filed period end.
+        # Net Assets per Xero at each filed period end. A dead token surfaces as
+        # NangoAuthError; report not-connected rather than a false "no differences".
         xero_na: dict[str, Optional[Decimal]] = {}
-        for f in filed:
-            report = await self._integration.fetch_balance_sheet(conn, tenant, f.period_end)
-            xero_na[f.period_end] = extract_net_assets_from_balance_sheet(report)
+        try:
+            for f in filed:
+                report = await self._integration.fetch_balance_sheet(conn, tenant, f.period_end)
+                xero_na[f.period_end] = extract_net_assets_from_balance_sheet(report)
+        except NangoAuthError:
+            return {"total_value": 0.0, "items": [], "ch_connected": self._ch.is_enabled(),
+                    "registration_number": reg_no, "connected": False}
 
         diffs = compute_opening_balance_diffs(
             filed, xero_na, min_difference=settings.opening_balance_min_difference)
@@ -123,6 +129,7 @@ class OpeningBalanceService:
             "items": items,
             "ch_connected": self._ch.is_enabled(),
             "registration_number": reg_no,
+            "connected": True,
         }
 
     async def _collect_filed(
