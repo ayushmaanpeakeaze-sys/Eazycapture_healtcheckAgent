@@ -26,6 +26,8 @@ from app.services.insights.bank import (
 )
 
 _DIRECTION = {"RECEIVE": "Received", "SPEND": "Spent"}
+# a voided/deleted transaction is not a real outstanding item — exclude it
+_VOID_STATUSES = {"VOIDED", "DELETED"}
 
 
 def _bank_accounts(coa: Optional[list[dict[str, Any]]]) -> dict[str, dict[str, str]]:
@@ -82,6 +84,8 @@ def compute_bank_reconciliation_summary(
     for t in bank_transactions or []:
         if not isinstance(t, dict) or _is_reconciled(t.get("IsReconciled")):
             continue
+        if (t.get("Status") or "").strip().upper() in _VOID_STATUSES:
+            continue   # voided/deleted → not a real outstanding item
         ba = t.get("BankAccount") or {}
         acc_id = str(ba.get("AccountID") or "").strip() if isinstance(ba, dict) else ""
         kind = (t.get("Type") or "").strip().upper()

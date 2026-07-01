@@ -62,6 +62,16 @@ def test_statement_balance_calculated_formula():
     assert a["statement_balance_calculated"] == 5150.0
 
 
+def test_voided_transaction_excluded():
+    # a voided (cancelled) unreconciled txn must NOT count towards the total
+    voided = _txn("id-090", "090", "SPEND", "5000", "false", "2026-05-05", "Voided Vendor")
+    voided["Status"] = "VOIDED"
+    res = compute_bank_reconciliation_summary(_tb(), _coa(), _txns() + [voided])
+    a = {x["account_code"]: x for x in res["accounts"]}["090"]
+    assert a["unreconciled_spent"] == 150.0     # 5000 voided NOT added
+    assert a["unreconciled_count"] == 3         # voided line not listed
+
+
 def test_imported_statement_always_none():
     res = compute_bank_reconciliation_summary(_tb(), _coa(), _txns())
     assert all(a["imported_statement_balance"] is None for a in res["accounts"])
