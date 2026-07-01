@@ -97,6 +97,7 @@ def test_multi_account_pure_two_distinct():
             _bill("2", 6, ref="R2").model_copy(update={"current_account_code": "401"})]
     hits = _find_multi_account_suppliers(txns, coa)
     assert len(hits) == 1 and hits[0].current_code in {"400", "401"}
+    assert hits[0].accounts_used == ["400", "401"]
     # A supplier that only ever uses ONE account → never flagged.
     same = [_bill("1", 5), _bill("2", 6), _bill("3", 7)]
     assert _find_multi_account_suppliers(same, coa) == []

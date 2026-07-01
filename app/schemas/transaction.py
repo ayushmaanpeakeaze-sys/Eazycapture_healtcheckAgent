@@ -211,6 +211,7 @@ class FlaggedIssue(_StrictBase):
     suggested_code: Optional[str] = None
     suggested_name: Optional[str] = None
     current_code: Optional[str] = None
+    accounts_used: Optional[list[str]] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     reasoning: Optional[str] = None
     # Duplicate-pair metadata (populated by duplicate_bill). Lets the

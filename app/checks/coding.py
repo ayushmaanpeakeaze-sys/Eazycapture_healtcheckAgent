@@ -99,6 +99,7 @@ def _find_multi_account_suppliers(
         if whitelist & ids:
             continue
         dominant = _dominant(accounts)        # the 'usual' account
+        accounts_used = sorted(set(accounts))
         seen: set[str] = set()                # one flag per transaction
         for tx, code in entries:
             if code != dominant and tx.transaction_id not in seen:
@@ -111,6 +112,7 @@ def _find_multi_account_suppliers(
                     suggested_code=dominant,
                     suggested_name=coa_lookup.get(dominant),
                     current_code=code,
+                    accounts_used=accounts_used,
                 ))
     return flagged
 
